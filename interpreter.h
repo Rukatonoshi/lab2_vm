@@ -124,7 +124,7 @@ u_int32_t *get_by_loc(u_int8_t bytecode, u_int32_t value) {
             u_int32_t n_args = *(stack_fp + 1);
             u_int32_t *argument = stack_fp + n_args + 2;
             u_int32_t *closure = (u_int32_t *) *argument;
-            return (u_int32_t *) Belem(closure, BOX(value + 1));
+            return (u_int32_t *) Belem_link(closure, BOX(value + 1));
         }
         default:
             failure("Severity ERROR: Invalid bytecode for loc.\n");
