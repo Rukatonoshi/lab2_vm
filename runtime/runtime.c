@@ -1474,7 +1474,7 @@ extern void* Ltl (void *v) {
 extern int Lread () {
   int result = BOX(0);
 
-  printf ("> ");
+  printf (" > ");
   fflush (stdout);
   scanf  ("%d", &result);
 
@@ -2157,7 +2157,7 @@ static void printFromSpace (void) {
       char * tag = de_hash (GET_SEXP_TAG(s->tag));
       printf ("(=>%p): SEXP\n\ttag(%s) ", s->contents.contents, tag);
       len = LEN(d->tag);
-      tmp = (s->contents.contents);
+      tmp = ((int *) s->contents.contents);
       for (int i = 0; i < len; i++) {
 	int elem = ((int*)tmp)[i];
 	if (UNBOXED(elem)) printf ("%d ", UNBOX(elem));

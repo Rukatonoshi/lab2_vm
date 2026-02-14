@@ -110,9 +110,3 @@ static inline bytecode_type get_bytecode_type(const u_int8_t ip) {
             return (bytecode_type) ip;
     }
 }
-
-
-
-
-
-

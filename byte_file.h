@@ -6,7 +6,6 @@
 #include <errno.h>
 #include "runtime/runtime.h"
 
-
 typedef struct {
     char *string_ptr;
     u_int32_t *public_ptr;
@@ -16,7 +15,6 @@ typedef struct {
     u_int32_t global_area_size;
     u_int32_t public_symbols_number;
     char buffer[0];
-    u_int32_t bytecode_size;
 } byte_file;
 
 byte_file *read_file(char *file_name) {
@@ -49,7 +47,5 @@ byte_file *read_file(char *file_name) {
     bf->public_ptr = (u_int32_t *) bf->buffer;
     bf->code_ptr = (char *) &bf->string_ptr[bf->string_table_size];
     bf->global_ptr = (u_int32_t *) malloc(bf->global_area_size * sizeof(int));
-    bf->bytecode_size = (char *) &bf->string_table_size + file_size - bf->code_ptr;
     return bf;
 }
-
