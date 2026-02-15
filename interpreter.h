@@ -129,6 +129,9 @@ u_int32_t *get_by_loc(u_int8_t bytecode, u_int32_t value) {
         default:
             failure("Severity ERROR: Invalid bytecode for loc.\n");
     }
+
+    // Should not reach
+    return NULL;
 }
 
 void exec_binop(u_int8_t bytecode) {
@@ -232,7 +235,7 @@ void exec_sexp() {
     u_int32_t sexp_tag = LtagHash(sexp_name);
     u_int32_t sexp_arity = get_next_int();
     reverse_on_stack(sexp_arity);
-    u_int32_t bsexp = (u_int32_t) Bsexp_my(BOX(sexp_arity + 1), sexp_tag, __gc_stack_top);
+    u_int32_t bsexp = (u_int32_t) Bsexp_my(BOX(sexp_arity + 1), sexp_tag, (int *) __gc_stack_top);
     __gc_stack_top += sexp_arity;
     vstack_push(bsexp);
 }
@@ -311,7 +314,7 @@ void exec_closure() {
         u_int32_t value = (u_int32_t) get_next_int();
         values[i] = *get_by_loc(b, value);
     }
-    u_int32_t blosure = (u_int32_t) Bclosure_my(BOX(bn), interpreterState.byteFile->code_ptr + ip, values);
+    u_int32_t blosure = (u_int32_t) Bclosure_my(BOX(bn), interpreterState.byteFile->code_ptr + ip, (int*) values);
     vstack_push(blosure);
 }
 
@@ -325,11 +328,26 @@ void exec_elem() {
 void exec_begin() {
     u_int32_t n_args = get_next_int();
     u_int32_t n_locals = get_next_int();
+
+    if (n_args < 0) failure("ERROR: BEGIN has negative number of arguments:  %d", n_args);
+    if (n_locals < 0) failure("ERROR: BEGIN has negative number of locals:  %d", n_locals);
+
     vstack_push((u_int32_t) stack_fp);
     stack_fp = __gc_stack_top;
     copy_on_stack(BOX(0), n_locals);
 }
 
+void exec_cbegin() {
+    u_int32_t n_args = get_next_int();
+    u_int32_t n_locals = get_next_int();
+
+    if (n_args < 0) failure("ERROR: BEGIN has negative number of arguments:  %d", n_args);
+    if (n_locals < 0) failure("ERROR: BEGIN has negative number of locals:  %d", n_locals);
+
+    vstack_push((u_int32_t) stack_fp);
+    stack_fp = __gc_stack_top;
+    copy_on_stack(BOX(0), n_locals);
+}
 
 void exec_end() {
     u_int32_t return_value = vstack_pop();
@@ -447,6 +465,7 @@ void interpret() {
             EXEC(CJMP_NZ, cjmp_nz)
             EXEC(ELEM, elem)
             EXEC(BEGIN, begin)
+            EXEC(CBEGIN, cbegin)
             EXEC(CALL, call)
             EXEC(CALLC, callc)
             EXEC(CALL_READ, call_read)

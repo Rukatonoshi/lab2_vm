@@ -1,4 +1,4 @@
-TARGET = lama-vm
+TARGET = lama-interpreter
 CC=gcc
 COMMON_FLAGS=-m32 -g2 -fstack-protector-all
 
@@ -12,8 +12,8 @@ runtime.o: runtime/runtime.c runtime/runtime.h
 	$(CC) $(COMMON_FLAGS) -c runtime/runtime.c
 
 vm.o: main.c byte_file.h bytecode_decoder.h interpreter.h
-	$(CC) $(COMMON_FLAGS) -c main.c
+	$(CC) $(COMMON_FLAGS) -Wall -c main.c
 
 clean:
-	$(RM) *.a *.o *~
+	$(RM) *.a *.o *~ $(TARGET)
 

@@ -4,8 +4,8 @@ set -o pipefail
 
 PROJECT_DIR="$(pwd)"
 LAMAC="${LAMAC:-$PROJECT_DIR/Lama/src/lamac}"
-TESTS_DIR="${TESTS_DIR:-regression/}"
-LAMA_INTERPRETER="${LAMA_INTERPRETER:-$PROJECT_DIR/lama-vm}"
+TESTS_DIR="${TESTS_DIR:-regression}"
+LAMA_INTERPRETER="${LAMA_INTERPRETER:-$PROJECT_DIR/lama-interpreter}"
 
 PASSED=0
 FAILED=0
@@ -17,6 +17,8 @@ if [ -e "$LAMAC" ]
 then
     echo "lamac exists"
 else
+    git submodule init
+    git submodule update
     echo "building lamac from sources"
     make -C "$PROJECT_DIR/Lama/runtime"
     make -C "$PROJECT_DIR/Lama/src"

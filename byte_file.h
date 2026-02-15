@@ -20,19 +20,23 @@ typedef struct {
 
 // Reads a bynary bytecode file by name and runs some checks
 byte_file *read_file(char *file_name) {
+    // 2GB file size limitation for fopen
     FILE *f = fopen(file_name, "rb");
     byte_file *bf;
 
-    if (f == 0) {
-        failure("%s\n", strerror(errno));
+    // Check if file could be opened
+    if (f == NULL) {
+        failure("failed to open file: %s\n", strerror(errno));
     }
 
-    if (fseek(f, 0, SEEK_END) == -1) {
+    // Check for non negative offset
+    if (fseek(f, 0, SEEK_END) < 0) {
         failure("%s\n", strerror(errno));
     }
 
     long file_size = ftell(f);
 
+    // Additional check for file size
     if (file_size > INT_MAX - (long)sizeof(int) * 4) {
         failure("File is too big!\nSize: %ld bytes\nMax: %ld\n",
                 file_size, INT_MAX - (long)sizeof(int) * 4);
@@ -41,7 +45,7 @@ byte_file *read_file(char *file_name) {
     size_t buffer_size = sizeof(int) * 4 + file_size;
     bf = (byte_file *) malloc(buffer_size);
 
-    if (bf == 0) {
+    if (bf == NULL) {
         failure("Severity ERROR: unable to allocate memory for byte_file.\n");
     }
 
@@ -49,7 +53,7 @@ byte_file *read_file(char *file_name) {
 
     if (file_size != fread(&bf->string_table_size, 1, file_size, f)) {
         free(bf);
-        failure("%s\n", strerror(errno));
+        failure("fread failed: %s\n", strerror(errno));
     }
 
     fclose(f);
@@ -64,26 +68,26 @@ byte_file *read_file(char *file_name) {
                 bf->string_table_size, bf->public_symbols_number, bf->global_area_size);
     }
 
-    // Publics table
-    // TODO types of vars
+    char *buffer_end = (char *) bf + buffer_size;
+
+    // Public symbols table
     size_t public_table_size = bf->public_symbols_number * 2 * sizeof(int);
-    if (bf->buffer + public_table_size > (char *) bf + buffer_size) {
+    if (bf->buffer + public_table_size > buffer_end) {
         free(bf);
         failure("Publics symbols table exceeds file bounds\n");
     }
     bf->public_ptr = (u_int32_t *) bf->buffer;
 
-    // String table
+    // Strings table
     bf->string_ptr = &bf->buffer[public_table_size];
-    //TODO bf + buffer_size
-    if(bf->string_ptr + bf->string_table_size > (char *) bf + buffer_size) {
+    if(bf->string_ptr + bf->string_table_size > buffer_end) {
         free(bf);
         failure("String table exceeds file bounds\n");
     }
 
     // Bytecode block
     bf->code_ptr = (char *) &bf->string_ptr[bf->string_table_size];
-    if (bf->code_ptr > (char *) bf + buffer_size) {
+    if (bf->code_ptr > buffer_end) {
         free(bf);
         failure("Bytecode block exceeds file bounds\n");
     }
