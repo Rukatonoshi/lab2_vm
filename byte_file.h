@@ -87,7 +87,7 @@ byte_file *read_file(char *file_name) {
 
     // Bytecode block
     bf->code_ptr = (char *) &bf->string_ptr[bf->string_table_size];
-    if (bf->code_ptr > buffer_end) {
+    if (bf->code_ptr >= buffer_end || bf->code_ptr < (char *) bf) {
         free(bf);
         failure("Bytecode block exceeds file bounds\n");
     }
@@ -100,4 +100,49 @@ byte_file *read_file(char *file_name) {
     }
 
     return bf;
+}
+
+//CHECK WIP TODO
+// Get string from the string table by index with bounds checking
+static inline const char* get_string(const byte_file *f, u_int32_t pos) {
+    if (pos >= f->string_table_size) {
+        failure("String index out of bounds: pos=%u, string_table_size=%u\n",
+                pos, f->string_table_size);
+    }
+    return f->string_ptr + pos;
+}
+
+// Get string from the string table by index with additional IP context
+static inline const char* get_string_with_ip(const byte_file *f, u_int32_t pos, const char *ip) {
+    if (pos >= f->string_table_size) {
+        if (ip && f->code_ptr) {
+            long offset = ip - f->code_ptr;  // ip points to the current instruction
+            failure("String index out of bounds at offset %ld (0x%lx): "
+                    "pos=%u, string_table_size=%u\n",
+                    offset, offset, pos, f->string_table_size);
+        } else {
+            // Fallback if IP is not available (should not happen when called from interpreter)
+            failure("String index out of bounds: pos=%u, string_table_size=%u\n",
+                    pos, f->string_table_size);
+        }
+    }
+    return f->string_ptr + pos;
+}
+
+// Get the name of a public symbol by index with bounds check
+static inline const char* get_public_name(const byte_file *f, u_int32_t idx) {
+    if (idx >= f->public_symbols_number) {
+        failure("Public symbol index out of bounds: %u (public_symbols_number: %u)\n",
+                idx, f->public_symbols_number);
+    }
+    return get_string(f, f->public_ptr[idx * 2]);
+}
+
+// Get the offset of a public symbol by index with bounds check
+static inline u_int32_t get_public_offset(const byte_file *f, u_int32_t idx) {
+    if (idx >= f->public_symbols_number) {
+        failure("Public symbol index out of bounds: %u (public_symbols_number: %u)\n",
+                idx, f->public_symbols_number);
+    }
+    return f->public_ptr[idx * 2 + 1];
 }

@@ -63,6 +63,9 @@ static u_int32_t *stack_start;
 typedef struct {
     byte_file *byteFile;
     char *ip;
+    //TODO WIP
+    char *code_start;
+    char *code_end;
 } interpreter_state;
 
 interpreter_state interpreterState;
@@ -77,7 +80,10 @@ static inline u_int32_t get_next_int() {
 }
 
 static inline char *get_next_string() {
-    return interpreterState.byteFile->string_ptr + get_next_int();
+    u_int32_t offset = get_next_int();
+    return (char*) get_string_with_ip(interpreterState.byteFile, offset, (char*) interpreterState.ip);
+    //TODO check if needed
+//    return interpreterState.byteFile->string_ptr + get_next_int();
 }
 
 static inline void vstack_push(u_int32_t value) {
@@ -415,6 +421,38 @@ void exec_callc() {
     interpreterState.ip = callee;
 }
 
+//TODO WIP
+// Get the entry point of the program (the "main" public symbol).
+static inline char* find_main_entrypoint(byte_file *bf, const char *code_end) {
+    // Checking in byte_file.h::read_file
+//    if (bf->public_symbols_number == 0) {
+//        failure("No public symbols in bytecode file\n");
+//    }
+    for (u_int32_t i = 0; i < bf->public_symbols_number; i++) {
+        const char *name = get_public_name(bf, i);
+        if (strcmp(name, "main") == 0) {
+            u_int32_t offset = get_public_offset(bf, i);
+            char *entry = bf->code_ptr + offset;
+
+            // Check that the entry point lies within the code bounds
+            if (entry < bf->code_ptr || entry >= code_end) {
+                failure("'main' offset %u points outside code section "
+                        "(code bounds: [%p, %p))\n",
+                        offset, (void*)bf->code_ptr, (void*)code_end);
+            }
+            return entry;
+        }
+    }
+
+    // Diagnostic: print first few public symbols
+    fprintf(stderr, "Main not found. Available symbols (%u total):\n",
+            bf->public_symbols_number);
+    for (u_int32_t i = 0; i < bf->public_symbols_number && i < 10; i++) {
+        fprintf(stderr, "  '%s'\n", get_public_name(bf, i));
+    }
+    failure("Required public symbol 'main' not found\n");
+    return NULL; // unreachable
+}
 
 void init_interpreter(byte_file *bf) {
     stack_start = malloc(RUNTIME_VSTACK_SIZE * sizeof(u_int32_t));
