@@ -425,9 +425,10 @@ void exec_callc() {
 // Get the entry point of the program (the "main" public symbol).
 static inline char* find_main_entrypoint(byte_file *bf, const char *code_end) {
     // Checking in byte_file.h::read_file
-//    if (bf->public_symbols_number == 0) {
-//        failure("No public symbols in bytecode file\n");
-//    }
+    if (bf->public_symbols_number == 0) {
+        failure("No public symbols in bytecode file\n");
+    }
+
     for (u_int32_t i = 0; i < bf->public_symbols_number; i++) {
         const char *name = get_public_name(bf, i);
         if (strcmp(name, "main") == 0) {
@@ -444,12 +445,13 @@ static inline char* find_main_entrypoint(byte_file *bf, const char *code_end) {
         }
     }
 
-    // Diagnostic: print first few public symbols
+    // Print first few public symbols for debug
     fprintf(stderr, "Main not found. Available symbols (%u total):\n",
             bf->public_symbols_number);
     for (u_int32_t i = 0; i < bf->public_symbols_number && i < 10; i++) {
         fprintf(stderr, "  '%s'\n", get_public_name(bf, i));
     }
+
     failure("Required public symbol 'main' not found\n");
     return NULL; // unreachable
 }
@@ -466,10 +468,12 @@ void init_interpreter(byte_file *bf) {
     stack_fp = __gc_stack_top;
     vstack_push(0); // argv
     vstack_push(0); // argc
-    vstack_push(2);
+    vstack_push(2); // dummys? TODO
 
     interpreterState.byteFile = bf;
-    interpreterState.ip = bf->code_ptr;
+    interpreterState.code_start = bf->code_ptr;
+    interpreterState.code_end = bf->code_ptr + bf->code_size;
+    interpreterState.ip = find_main_entrypoint(bf, (const char*) interpreterState.code_end);
 }
 
 

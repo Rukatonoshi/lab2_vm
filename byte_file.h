@@ -15,6 +15,7 @@ typedef struct {
     u_int32_t string_table_size;     // The size of the string table (byte)
     u_int32_t global_area_size;      // The size of global area (word)
     u_int32_t public_symbols_number; // The number of public symbols
+    u_int32_t code_size;             // The size of the bytecode (byte)
     char buffer[0];
 } byte_file;
 
@@ -22,7 +23,6 @@ typedef struct {
 byte_file *read_file(char *file_name) {
     // 2GB file size limitation for fopen
     FILE *f = fopen(file_name, "rb");
-    byte_file *bf;
 
     // Check if file could be opened
     if (f == NULL) {
@@ -35,69 +35,101 @@ byte_file *read_file(char *file_name) {
     }
 
     long file_size = ftell(f);
+    if (file_size == -1) {
+        failure("ftell failed: %s\n", strerror(errno));
+    }
 
     // Additional check for file size
-    if (file_size > INT_MAX - (long)sizeof(int) * 4) {
+    if (file_size > INT_MAX - (long) sizeof(int) * 4) {
         failure("File is too big!\nSize: %ld bytes\nMax: %ld\n",
-                file_size, INT_MAX - (long)sizeof(int) * 4);
+                file_size, INT_MAX - (long) sizeof(int) * 4);
     }
 
-    size_t buffer_size = sizeof(int) * 4 + file_size;
-    bf = (byte_file *) malloc(buffer_size);
-
-    if (bf == NULL) {
-        failure("Severity ERROR: unable to allocate memory for byte_file.\n");
-    }
-
+    // Rewind and read header (first three 32-bit values)
     rewind(f);
-
-    if (file_size != fread(&bf->string_table_size, 1, file_size, f)) {
-        free(bf);
-        failure("fread failed: %s\n", strerror(errno));
+    u_int32_t header[3];
+    if (fread(header, sizeof(u_int32_t), 3, f) != 3) {
+        failure("Failed to read header: %s\n", strerror(errno));
     }
 
-    fclose(f);
+    u_int32_t string_table_size = header[0];
+    u_int32_t global_area_size = header[1];
+    u_int32_t public_symbols_number = header[2];
+
+    // Sanity checks for header values
+    if (string_table_size > 100 * 1024 * 1024 ||  // 100 MB
+        global_area_size  > 10 * 1024 * 1024 ||   // 10 million words
+        public_symbols_number > 1000000)          // 1 million symbols
+    {
+        failure("Header values too large: string_table=%u, global_area=%u, publics=%u\n",
+                string_table_size, global_area_size, public_symbols_number);
+    }
 
     // Checks for header fields values
-    if (bf->string_table_size < 0 ||
-        bf->public_symbols_number < 0 ||
-        bf->global_area_size < 0)
+    if (string_table_size < 0 ||
+        public_symbols_number < 0 ||
+        global_area_size < 0)
+    {
+        failure("Negative values in header:\nString table = %ld\nPublic syms = %ld\nGlobal area = %ld\n",
+                string_table_size, public_symbols_number, global_area_size);
+    }
+
+    // Compute sizes
+    size_t public_table_size = (size_t) public_symbols_number * 2 * sizeof(u_int32_t);
+    size_t data_size = public_table_size + string_table_size;
+    if (file_size < (long) (3 * sizeof(u_int32_t) + data_size)) {
+        failure("File truncated: expected at least %zu bytes, got %ld\n",
+                3 * sizeof(u_int32_t) + data_size, file_size);
+    }
+    u_int32_t code_size = file_size - (3 * sizeof(u_int32_t) + data_size);
+
+    // Allocate memory for byte_file structure plus the data buffer
+    byte_file *bf = (byte_file *)malloc(sizeof(byte_file) + data_size + code_size);
+
+    if (bf == NULL) {
+        failure("Unable to allocate memory for byte_file\n");
+    }
+
+    // Fill header fields
+    bf->string_table_size = string_table_size;
+    bf->global_area_size = global_area_size;
+    bf->public_symbols_number = public_symbols_number;
+
+    // Set pointers within the buffer
+    char *buffer = bf->buffer;
+    bf->public_ptr = (u_int32_t*) buffer;
+    bf->string_ptr = buffer + public_table_size;
+    bf->code_ptr = bf->string_ptr + string_table_size;
+
+    // Read the remaining data (publics + strings + code)
+    if (fread(buffer, 1, data_size + code_size, f) != data_size + code_size) {
+        free(bf);
+        failure("Failed to read data: %s\n", strerror(errno));
+    }
+    fclose(f);
+
+    // Check that pointers stay within allocated buffer
+    char *buffer_end = (char*) bf + sizeof(byte_file) + data_size + code_size;
+    if (bf->public_ptr > (u_int32_t*)buffer_end ||
+        bf->string_ptr > buffer_end ||
+        bf->code_ptr > buffer_end)
     {
         free(bf);
-        failure("Negative values in header:\nString table = %ld\nPublic syms = %ld\nGlobal area = %ld\n",
-                bf->string_table_size, bf->public_symbols_number, bf->global_area_size);
+        failure("Internal error: pointers exceed buffer bounds\n");
     }
 
-    char *buffer_end = (char *) bf + buffer_size;
+    // Store code_size in structure for future bounds checks
+    bf->code_size = code_size;
 
-    // Public symbols table
-    size_t public_table_size = bf->public_symbols_number * 2 * sizeof(int);
-    if (bf->buffer + public_table_size > buffer_end) {
+    // Allocate global area separately
+    bf->global_ptr = (u_int32_t*) calloc(bf->global_area_size, sizeof(u_int32_t));
+    if (bf->global_ptr == NULL && bf->global_area_size > 0) {
         free(bf);
-        failure("Publics symbols table exceeds file bounds\n");
-    }
-    bf->public_ptr = (u_int32_t *) bf->buffer;
-
-    // Strings table
-    bf->string_ptr = &bf->buffer[public_table_size];
-    if(bf->string_ptr + bf->string_table_size > buffer_end) {
-        free(bf);
-        failure("String table exceeds file bounds\n");
+        failure("Failed to allocate memory for global area\n");
     }
 
-    // Bytecode block
-    bf->code_ptr = (char *) &bf->string_ptr[bf->string_table_size];
-    if (bf->code_ptr >= buffer_end || bf->code_ptr < (char *) bf) {
-        free(bf);
-        failure("Bytecode block exceeds file bounds\n");
-    }
-
-    // Global area
-    bf->global_ptr = (u_int32_t *) malloc(bf->global_area_size * sizeof(int));
-    if (!bf->global_ptr && bf->global_area_size > 0) {
-        free(bf);
-        failure("Error: failed to allocate memory for global area\n");
-    }
+    // DEBUG
+//    printf("DEBUG:\nfile_size=%ld\ncode_size=%ld\ndata_size=%ld\n", file_size, code_size, data_size);
 
     return bf;
 }
