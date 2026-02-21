@@ -63,27 +63,50 @@ static u_int32_t *stack_start;
 typedef struct {
     byte_file *byteFile;
     char *ip;
-    //TODO WIP
+    //TODO check if needed
     char *code_start;
-    char *code_end;
+    const char *code_end;
 } interpreter_state;
 
 interpreter_state interpreterState;
 
+// Verbose description of error and code locations
+static void runtime_error(const char *fmt, ...) {
+    // Offset of current instruction
+    long offset = interpreterState.ip - interpreterState.code_start - 1;
+    fprintf(stderr, "Runtime error at offset %ld (0x%lx): ", offset, offset);
+    va_list args;
+    va_start(args, fmt);
+    vfprintf(stderr, fmt, args);
+    va_end(args);
+    fprintf(stderr, "\n");
+    exit(EXIT_FAILURE);
+}
+
+// Check that we have required bytes remaining in the code section
+static inline void check_code_bounds(size_t bytes_to_read) {
+    if (interpreterState.ip + bytes_to_read > interpreterState.code_end) {
+        failure("Requested value is out of bounds:\nip=%p\nbytes=%zu\ncode_end=%p",
+                *interpreterState.ip, bytes_to_read, *interpreterState.code_end);
+    }
+}
+
+// Read next byte
 static inline u_int8_t get_next_byte() {
+    check_code_bounds(1);
     return *interpreterState.ip++;
 }
 
+// Read next integer
 static inline u_int32_t get_next_int() {
+    check_code_bounds(sizeof(int));
     interpreterState.ip += sizeof(int);
     return *(u_int32_t *) (interpreterState.ip - sizeof(int));
 }
 
 static inline char *get_next_string() {
-    u_int32_t offset = get_next_int();
-    return (char*) get_string_with_ip(interpreterState.byteFile, offset, (char*) interpreterState.ip);
-    //TODO check if needed
-//    return interpreterState.byteFile->string_ptr + get_next_int();
+    u_int32_t offset = get_next_int(); //check inside func
+    return (char*) get_string_with_ip(interpreterState.byteFile, offset, interpreterState.ip); //check in func
 }
 
 static inline void vstack_push(u_int32_t value) {
@@ -141,31 +164,41 @@ u_int32_t *get_by_loc(u_int8_t bytecode, u_int32_t value) {
 }
 
 void exec_binop(u_int8_t bytecode) {
-#define BINOP_CODE(OP) \
-        {              \
-        int b = UNBOX(vstack_pop()); \
-        int a = UNBOX(vstack_pop()); \
-        vstack_push(BOX(a OP b)); \
-        return; \
-        }
+    int b = UNBOX(vstack_pop());
+    int a = UNBOX(vstack_pop());
+    int result;
+
     switch (low_bits(bytecode)) {
-        case PLUS: BINOP_CODE(+)
-        case MINUS: BINOP_CODE(-)
-        case MULTIPLY: BINOP_CODE(*)
-        case DIVIDE: BINOP_CODE(/)
-        case REMAINDER: BINOP_CODE(%)
-        case LESS: BINOP_CODE(<)
-        case LESS_EQUAL: BINOP_CODE(<=)
-        case GREATER: BINOP_CODE(>)
-        case GREATER_EQUAL: BINOP_CODE(>=)
-        case EQUAL: BINOP_CODE(==)
-        case NOT_EQUAL: BINOP_CODE(!=)
-        case AND: BINOP_CODE(&&)
-        case OR: BINOP_CODE(||)
+        case PLUS:          result = a + b; break;
+        case MINUS:         result = a - b; break;
+        case MULTIPLY:      result = a * b; break;
+        case DIVIDE:
+            if (b == 0) {
+                //failure("Division by zero");
+                runtime_error("Division by zero: a=%d, b=0", a);
+            }
+            result = a / b;
+            break;
+        case REMAINDER:
+            if (b == 0) {
+                //failure("Remainder by zero");
+                runtime_error("Remainder by zero: a=%d, b=0", a);
+            }
+            result = a % b;
+            break;
+        case LESS:          result = a < b; break;
+        case LESS_EQUAL:    result = a <= b; break;
+        case GREATER:       result = a > b; break;
+        case GREATER_EQUAL: result = a >= b; break;
+        case EQUAL:         result = a == b; break;
+        case NOT_EQUAL:     result = a != b; break;
+        case AND:           result = a && b; break;
+        case OR:            result = a || b; break;
         default:
-            failure("Severity ERROR: Unknown binop bytecode.\n");
+            failure("Unknown binop bytecode: %d", low_bits(bytecode));
     }
-#undef BINOP_CODE
+
+    vstack_push(BOX(result));
 }
 
 void exec_ld(u_int8_t bytecode) {
@@ -421,10 +454,9 @@ void exec_callc() {
     interpreterState.ip = callee;
 }
 
-//TODO WIP
 // Get the entry point of the program (the "main" public symbol).
 static inline char* find_main_entrypoint(byte_file *bf, const char *code_end) {
-    // Checking in byte_file.h::read_file
+    // Check public symbols
     if (bf->public_symbols_number == 0) {
         failure("No public symbols in bytecode file\n");
     }
@@ -474,6 +506,12 @@ void init_interpreter(byte_file *bf) {
     interpreterState.code_start = bf->code_ptr;
     interpreterState.code_end = bf->code_ptr + bf->code_size;
     interpreterState.ip = find_main_entrypoint(bf, (const char*) interpreterState.code_end);
+    // DEBUG
+//    printf("\nCode_start=%p\nCode_end=%p\nCode_size=%u\nip=%p\n",
+//            interpreterState.code_end,
+//            interpreterState.code_start,
+//            bf->code_size,
+//            interpreterState.ip);
 }
 
 
@@ -491,13 +529,13 @@ void interpret() {
             exec_##EXEC_SUFFIX();  \
             break;
         switch (bc_type) {
-            /** interpret bytecodes with meaningful lower bits */
+            // Interpret bytecodes with meaningful lower bits
             EXEC_WITH_LOWER_BITS(BINOP, binop)
             EXEC_WITH_LOWER_BITS(LD, ld)
             EXEC_WITH_LOWER_BITS(LDA, lda)
             EXEC_WITH_LOWER_BITS(ST, st)
             EXEC_WITH_LOWER_BITS(PATT, patt)
-            /** interpret other bytecodes  */
+            // Interpret other bytecodes
             EXEC(CONST, const)
             EXEC(XSTRING, string)
             EXEC(SEXP, sexp)
