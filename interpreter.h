@@ -46,10 +46,45 @@ extern int Bboxed_patt(void *x);
 
 extern int Bclosure_tag_patt(void *x);
 
+// Data struct from runtime.c
+typedef struct {
+  int tag;
+  char contents[0];
+} data;
+
 // redefined from runtime.c for performance using the preprocessor
 # define UNBOXED(x)  (((int) (x)) &  0x0001)
 # define UNBOX(x)    (((int) (x)) >> 1)
 # define BOX(x)      ((((int) (x)) << 1) | 0x0001)
+
+# define TO_DATA(x) ((data*)((char*)(x)-sizeof(int)))
+# define STRING_TAG  0x00000001
+# define ARRAY_TAG   0x00000003
+# define SEXP_TAG    0x00000005
+# define CLOSURE_TAG 0x00000007
+# define TAG(x)  (x & 0x00000007)
+
+// Macroses to check type of value
+#define IS_STRING(val) (!UNBOXED(val) && TAG(TO_DATA(val)->tag) == STRING_TAG)
+#define IS_ARRAY(val) (!UNBOXED(val) && TAG(TO_DATA(val)->tag) == ARRAY_TAG)
+#define IS_SEXP(val) (!UNBOXED(val) && TAG(TO_DATA(val)->tag) == SEXP_TAG)
+#define IS_CLOSURE(val) (!UNBOXED(val) && TAG(TO_DATA(val)->tag) == CLOSURE_TAG)
+#define IS_AGGREGATIVE(val) (IS_STRING(val) || IS_ARRAY(val) || IS_SEXP(val))
+
+// Returns type of stringified(?) value
+static const char* type_name(u_int32_t val) {
+    if (UNBOXED(val)) return "integer";
+    // Detect obj tag
+    data *d = TO_DATA((void *) val);
+    int tag = TAG(d->tag);
+    switch (tag) {
+        case STRING_TAG:  return "string";
+        case ARRAY_TAG:   return "array";
+        case SEXP_TAG:    return "sexp";
+        case CLOSURE_TAG: return "closure";
+        default:          return "unknown boxed";
+    }
+}
 
 extern u_int32_t *__gc_stack_top, *__gc_stack_bottom;
 void *__start_custom_data, *__stop_custom_data;
@@ -164,9 +199,16 @@ u_int32_t *get_by_loc(u_int8_t bytecode, u_int32_t value) {
 }
 
 void exec_binop(u_int8_t bytecode) {
-    int b = UNBOX(vstack_pop());
-    int a = UNBOX(vstack_pop());
+    int b = vstack_pop();
+    int a = vstack_pop();
     int result;
+
+    if (!UNBOXED(b) || !UNBOXED(a)) {
+        runtime_error("BINOP expected integers, got %s and %s", type_name(b), type_name(a));
+    }
+
+    a = UNBOX(a);
+    b = UNBOX(b);
 
     switch (low_bits(bytecode)) {
         case PLUS:          result = a + b; break;
@@ -174,14 +216,12 @@ void exec_binop(u_int8_t bytecode) {
         case MULTIPLY:      result = a * b; break;
         case DIVIDE:
             if (b == 0) {
-                //failure("Division by zero");
                 runtime_error("Division by zero: a=%d, b=0", a);
             }
             result = a / b;
             break;
         case REMAINDER:
             if (b == 0) {
-                //failure("Remainder by zero");
                 runtime_error("Remainder by zero: a=%d, b=0", a);
             }
             result = a % b;
@@ -322,7 +362,12 @@ void exec_call_read() {
 }
 
 void exec_call_write() {
-    int w = Lwrite(vstack_pop());
+    u_int32_t arg = vstack_pop();
+    // Check if integer
+    if (!UNBOXED(arg)) {
+        runtime_error("Lwrite expected integer, got %s", type_name(arg));
+    }
+    int w = Lwrite((int) arg);
     vstack_push(w);
 }
 
@@ -332,7 +377,11 @@ void exec_call_string() {
 }
 
 void exec_call_length() {
-    u_int32_t l = (u_int32_t) Llength((void *) vstack_pop());
+    u_int32_t arg = vstack_pop();
+    if (!IS_AGGREGATIVE(arg)) {
+        runtime_error("Llength expected string, array or sexp, got %s", type_name(arg));
+    }
+    u_int32_t l = (u_int32_t) Llength((void *) arg);
     vstack_push(l);
 }
 
