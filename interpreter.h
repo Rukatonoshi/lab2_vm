@@ -460,8 +460,36 @@ void exec_closure() {
 
 void exec_elem() {
     u_int32_t index = vstack_pop();
-    void *p = (void *) vstack_pop();
-    u_int32_t belem = (u_int32_t) Belem(p, index);
+    void *obj = (void *) vstack_pop();
+
+    if (!IS_AGGREGATIVE(obj)) {
+        runtime_error("ELEM expected aggregative (string/array/sexp), got %s",
+                      type_name((u_int32_t) obj));
+    }
+
+    if (!UNBOXED(index)) {
+        runtime_error("ELEM index must be integer, got %s",
+                      type_name(index));
+    }
+
+    // Index must be positive
+    if (index < 0) {
+        runtime_error("ELEM index cannot be negative: %d", index);
+    }
+
+    // Get len of obj and check if it positive
+    int len = Llength(obj);
+    if (len < 0) {
+        runtime_error("ELEM: cannot determine length of object type %s",
+                      type_name((u_int32_t) obj));
+    }
+
+    // Check idx bounds
+    if (index >= len) {
+        runtime_error("ELEM index %d out of bounds (length %d)", index, len);
+    }
+
+    u_int32_t belem = (u_int32_t) Belem(obj, index);
     vstack_push(belem);
 }
 
