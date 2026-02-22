@@ -16,4 +16,5 @@ vm.o: main.c byte_file.h bytecode_decoder.h interpreter.h
 
 clean:
 	$(RM) *.a *.o *~ $(TARGET)
+	$(RM) regression/*.bc custom-tests/*.bc
 

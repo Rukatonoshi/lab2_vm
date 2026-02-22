@@ -199,31 +199,49 @@ u_int32_t *get_by_loc(u_int8_t bytecode, u_int32_t value) {
 }
 
 void exec_binop(u_int8_t bytecode) {
-    int b = vstack_pop();
-    int a = vstack_pop();
-    int result;
+    u_int32_t b_val = vstack_pop();
+    u_int32_t a_val = vstack_pop();
+    u_int8_t op = low_bits(bytecode);
 
-    if (!UNBOXED(b) || !UNBOXED(a)) {
-        runtime_error("BINOP expected integers, got %s and %s", type_name(b), type_name(a));
+    // Check if operands type is integer
+    int a_is_int = UNBOXED(a_val);
+    int b_is_int = UNBOXED(b_val);
+
+    // For EQUAL, one of the operands must be an integer. Integers are never equal to values of other types.
+    if (op == EQUAL) {
+        if (a_is_int && b_is_int) {
+            int a = UNBOX(a_val);
+            int b = UNBOX(b_val);
+            vstack_push(BOX(a == b));
+        } else if (a_is_int || b_is_int) {
+            vstack_push(BOX(0));
+        } else {
+            runtime_error("BINOP EQUAL called with two non-integer arguments: %s and %s",
+                          type_name(a_val), type_name(b_val));
+        }
+
+        return;
     }
 
-    a = UNBOX(a);
-    b = UNBOX(b);
+    // Check if both operands are integers indeed
+    if (!a_is_int || !b_is_int) {
+        runtime_error("BINOP expected integers, got %s and %s", type_name(a_val), type_name(b_val));
+    }
 
-    switch (low_bits(bytecode)) {
+    int a = UNBOX(a_val);
+    int b = UNBOX(b_val);
+    int result;
+
+    switch (op) {
         case PLUS:          result = a + b; break;
         case MINUS:         result = a - b; break;
         case MULTIPLY:      result = a * b; break;
         case DIVIDE:
-            if (b == 0) {
-                runtime_error("Division by zero: a=%d, b=0", a);
-            }
+            if (b == 0) runtime_error("Division by zero: a=%d, b=0", a);
             result = a / b;
             break;
         case REMAINDER:
-            if (b == 0) {
-                runtime_error("Remainder by zero: a=%d, b=0", a);
-            }
+            if (b == 0) runtime_error("Remainder by zero: a=%d, b=0", a);
             result = a % b;
             break;
         case LESS:          result = a < b; break;
