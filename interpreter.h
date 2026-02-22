@@ -394,16 +394,26 @@ void exec_jmp() {
 
 void exec_cjmp_z() {
     u_int32_t ip_offset = get_next_int();
-    int cmp_value = UNBOX(vstack_pop());
-    if (cmp_value == 0) {
+    int cmp_value = vstack_pop();
+
+    if (!UNBOXED(cmp_value)) {
+        runtime_error("Wrong jump condition type: expected integer, got %s", type_name(cmp_value));
+    }
+
+    if (UNBOX(cmp_value) == 0) {
         jump(ip_offset);
     }
 }
 
 void exec_cjmp_nz() {
     u_int32_t ip_offset = get_next_int();
-    int cmp_value = UNBOX(vstack_pop());
-    if (cmp_value != 0) {
+    int cmp_value = vstack_pop();
+
+    if (!UNBOXED(cmp_value)) {
+        runtime_error("Wrong jump condition type: expected integer, got %s", type_name(cmp_value));
+    }
+
+    if (UNBOX(cmp_value) != 0) {
         jump(ip_offset);
     }
 }
@@ -454,8 +464,8 @@ void exec_closure() {
         u_int32_t value = (u_int32_t) get_next_int();
         values[i] = *get_by_loc(b, value);
     }
-    u_int32_t blosure = (u_int32_t) Bclosure_my(BOX(bn), interpreterState.byteFile->code_ptr + ip, (int*) values);
-    vstack_push(blosure);
+    u_int32_t bclosure = (u_int32_t) Bclosure_my(BOX(bn), interpreterState.byteFile->code_ptr + ip, (int*) values);
+    vstack_push(bclosure);
 }
 
 void exec_elem() {
