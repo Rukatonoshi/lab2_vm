@@ -379,7 +379,12 @@ void exec_sta() {
 }
 
 void jump(u_int32_t ip_offset) {
-    interpreterState.ip = interpreterState.byteFile->code_ptr + ip_offset;
+    char * jmp_addr = interpreterState.code_start + ip_offset;
+    if (jmp_addr < interpreterState.code_start || jmp_addr >= interpreterState.code_end) {
+        runtime_error("Jump address %p points outside of code section [%p, %p)",
+                (void *) jmp_addr, (void *) interpreterState.code_end, (void *) interpreterState.code_end);
+    }
+    interpreterState.ip = jmp_addr;
 }
 
 void exec_jmp() {
