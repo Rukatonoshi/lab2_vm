@@ -339,14 +339,43 @@ void exec_sexp() {
 
 void exec_sta() {
     u_int32_t value = vstack_pop();
-    u_int32_t index = vstack_pop();
-    u_int32_t bsta;
-    if (UNBOXED(index)) {
-        bsta = (u_int32_t) Bsta((void *) value, index, (void *) vstack_pop());
-    } else {
-        bsta = (u_int32_t) Bsta((void *) value, index, 0);
+    u_int32_t idx_val = vstack_pop();
+
+    // The operation is overloaded;
+    // its behavior depends on the second-to-top value on the stack, which must be either
+    // a reference to a variable or an integer
+    if (!UNBOXED(idx_val)) {
+        // Second-to-top value is a referene
+        vstack_push((u_int32_t) Bsta((void *) value, idx_val, 0));
+        return;
     }
-    vstack_push(bsta);
+
+    // Check if obj type is aggregative (string/array/sexp)
+    u_int32_t obj = vstack_pop();
+    if (!IS_AGGREGATIVE(obj)) {
+        runtime_error("STA expected aggregative (string/array/sexp), got %s",
+                      type_name(value));
+    }
+
+    // Index must be positive
+    if (idx_val < 0) {
+        runtime_error("STA index cannot be negative: %d", idx_val);
+    }
+
+    // Get len of obj and check if it positive
+    int len = Llength((void*)obj);
+    if (len < 0) {
+        runtime_error("STA: cannot determine length of object type %s",
+                      type_name(obj));
+    }
+
+    // Check idx bounds
+    if (idx_val >= len) {
+        runtime_error("STA index %d out of bounds (length %d)", idx_val, len);
+    }
+
+    u_int32_t result = (u_int32_t) Bsta((void*)value, idx_val, (void*)obj);
+    vstack_push(result);
 }
 
 void jump(u_int32_t ip_offset) {
