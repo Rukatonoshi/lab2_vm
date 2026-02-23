@@ -104,6 +104,7 @@ typedef struct {
 } interpreter_state;
 
 interpreter_state interpreterState;
+static u_int32_t current_frame_locals;
 
 // Verbose description of error and code locations
 static void runtime_error(const char *fmt, ...) {
@@ -178,21 +179,45 @@ static inline void reverse_on_stack(int count) {
 
 u_int32_t *get_by_loc(u_int8_t bytecode, u_int32_t value) {
     switch (low_bits(bytecode)) {
-        case GLOBAL:
+        case L_GLOBAL:
             if (value >= interpreterState.byteFile->global_area_size) {
                 runtime_error("Global index %u out of bounds (size %u)",
                               value, interpreterState.byteFile->global_area_size);
             }
             return interpreterState.globals_base + value;
-        case LOCAL:
-            return stack_fp - value - 1;
-        case ARGUMENT:
+        case L_LOCAL:
+            if (value >= current_frame_locals) {
+                runtime_error("Local index %u out of bounds (current frame has %u locals)",
+                              value, current_frame_locals);
+            }
+            return stack_fp - value - 2;
+        case L_ARGUMENT:
+            u_int32_t n_args = *(stack_fp + 1);
+            if (value >= n_args) {
+                runtime_error("Argument index %u out of bounds (current call has %u args)",
+                              value, n_args);
+            }
             return stack_fp + value + 3;
-        case CLOJURE : {
+        case L_CLOSURE: {
             u_int32_t n_args = *(stack_fp + 1);
             u_int32_t *argument = stack_fp + n_args + 2;
-            u_int32_t *closure = (u_int32_t *) *argument;
-            return (u_int32_t *) Belem_link(closure, BOX(value + 1));
+            u_int32_t *closure_val = (u_int32_t *) *argument;
+            if (closure_val == NULL) {
+                runtime_error("CLOSURE: null closure encountered");
+            }
+            // Check if it's closure
+            data *d = TO_DATA((void *) closure_val);
+            if (TAG(d->tag) != CLOSURE_TAG) {
+                runtime_error("CLOSURE: object is not a closure");
+            }
+            // Closure size with entry
+            u_int32_t total_words = d->tag >> 3; // n+1, n - num of captured variables
+            u_int32_t n_captured = total_words - 1;
+            if (value >= n_captured) {
+                runtime_error("CLOSURE: index %u out of bounds (captured variables: %u)",
+                              value, n_captured);
+            }
+            return (u_int32_t *) Belem_link((void *) closure_val, BOX(value + 1));
         }
         default:
             runtime_error("Invalid location type %d", low_bits(bytecode));
@@ -515,7 +540,15 @@ void exec_begin() {
     if (n_locals < 0) failure("ERROR: BEGIN has negative number of locals:  %d", n_locals);
 
     vstack_push((u_int32_t) stack_fp);
-    stack_fp = __gc_stack_top;
+    vstack_push(current_frame_locals);
+    //DEBUG
+    //fprintf(stdout, "BEGIN: current_frame_locals = %u\n", current_frame_locals);
+    stack_fp = __gc_stack_top + 1;
+
+    // Current frame locals
+    current_frame_locals = n_locals;
+
+    // Init space for new locals
     copy_on_stack(BOX(0), n_locals);
 }
 
@@ -527,18 +560,31 @@ void exec_cbegin() {
     if (n_locals < 0) failure("ERROR: BEGIN has negative number of locals:  %d", n_locals);
 
     vstack_push((u_int32_t) stack_fp);
-    stack_fp = __gc_stack_top;
+    vstack_push(current_frame_locals);
+    //DEBUG
+    //fprintf(stdout, "CBEGIN current_frame_locals = %u\n", current_frame_locals);
+
+    stack_fp = __gc_stack_top + 1;
+    current_frame_locals = n_locals;
     copy_on_stack(BOX(0), n_locals);
 }
 
 void exec_end() {
     u_int32_t return_value = vstack_pop();
+
+    u_int32_t saved_locals = *(stack_fp - 1);
+    current_frame_locals = saved_locals;
+
     __gc_stack_top = stack_fp;
-    u_int32_t value_on_stack = *(__gc_stack_top++);
-    stack_fp = (u_int32_t *) value_on_stack;
+
+    u_int32_t prev_fp = *(__gc_stack_top++);
+    stack_fp = (u_int32_t*)prev_fp;
+
     u_int32_t n_args = vstack_pop();
-    char *addr = (char *) vstack_pop();
+    char *addr = (char*)vstack_pop();
+
     __gc_stack_top += n_args;
+
     vstack_push(return_value);
     interpreterState.ip = addr;
 }

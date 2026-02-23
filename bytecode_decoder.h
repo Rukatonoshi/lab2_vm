@@ -62,10 +62,10 @@ typedef enum {
 
 // LD, LDA and ST
 typedef enum {
-    GLOBAL = 0x00,
-    LOCAL = 0x01,
-    ARGUMENT = 0x02,
-    CLOJURE = 0x03
+    L_GLOBAL = 0x00,
+    L_LOCAL = 0x01,
+    L_ARGUMENT = 0x02,
+    L_CLOSURE = 0x03
 } LOC;
 
 // PATT group
