@@ -100,6 +100,7 @@ typedef struct {
     char       *ip;
     char       *code_start;
     const char *code_end;
+    u_int32_t *globals_base;
 } interpreter_state;
 
 interpreter_state interpreterState;
@@ -178,7 +179,11 @@ static inline void reverse_on_stack(int count) {
 u_int32_t *get_by_loc(u_int8_t bytecode, u_int32_t value) {
     switch (low_bits(bytecode)) {
         case GLOBAL:
-            return interpreterState.byteFile->global_ptr + value;
+            if (value >= interpreterState.byteFile->global_area_size) {
+                runtime_error("Global index %u out of bounds (size %u)",
+                              value, interpreterState.byteFile->global_area_size);
+            }
+            return interpreterState.globals_base + value;
         case LOCAL:
             return stack_fp - value - 1;
         case ARGUMENT:
@@ -190,7 +195,7 @@ u_int32_t *get_by_loc(u_int8_t bytecode, u_int32_t value) {
             return (u_int32_t *) Belem_link(closure, BOX(value + 1));
         }
         default:
-            failure("Severity ERROR: Invalid bytecode for loc.\n");
+            runtime_error("Invalid location type %d", low_bits(bytecode));
     }
 
     // Should not reach
@@ -647,7 +652,13 @@ void init_interpreter(byte_file *bf) {
         failure("Severity ERROR: Failed to allocate memory for virtual stack.\n");
     }
     // init __gc_stack_bottom and __gc_stack_top for detection of lama GC and call extern __gc__init
-    __gc_stack_bottom = __gc_stack_top = stack_start + RUNTIME_VSTACK_SIZE;
+    __gc_stack_bottom = stack_start + RUNTIME_VSTACK_SIZE;
+    __gc_stack_top = __gc_stack_bottom;
+
+    // Add globals to stack
+    __gc_stack_top -= bf->global_area_size;
+    interpreterState.globals_base = __gc_stack_top;
+
     __gc_init();
 
     stack_fp = __gc_stack_top;

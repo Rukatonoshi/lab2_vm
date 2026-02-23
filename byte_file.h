@@ -11,7 +11,6 @@ typedef struct {
     char *string_ptr;                // A pointer to the beginning of the string table
     u_int32_t *public_ptr;           // A pointer to the beginning of publics table
     char *code_ptr;                  // A pointer to the bytecode itself
-    u_int32_t *global_ptr;           // A pointer to the global area
     u_int32_t string_table_size;     // The size of the string table (byte)
     u_int32_t global_area_size;      // The size of global area (word)
     u_int32_t public_symbols_number; // The number of public symbols
@@ -120,21 +119,12 @@ byte_file *read_file(char *file_name) {
 
     // Store code_size in structure for future bounds checks
     bf->code_size = code_size;
-
-    // Allocate global area separately
-    bf->global_ptr = (u_int32_t*) calloc(bf->global_area_size, sizeof(u_int32_t));
-    if (bf->global_ptr == NULL && bf->global_area_size > 0) {
-        free(bf);
-        failure("Failed to allocate memory for global area\n");
-    }
-
     // DEBUG
 //    printf("DEBUG:\nfile_size=%ld\ncode_size=%ld\ndata_size=%ld\n", file_size, code_size, data_size);
 
     return bf;
 }
 
-//CHECK WIP TODO
 // Get string from the string table by index with bounds checking
 static inline const char* get_string(const byte_file *f, u_int32_t pos) {
     if (pos >= f->string_table_size) {
