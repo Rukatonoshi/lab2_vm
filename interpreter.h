@@ -96,10 +96,9 @@ static u_int32_t *stack_fp;
 static u_int32_t *stack_start;
 
 typedef struct {
-    byte_file *byteFile;
-    char *ip;
-    //TODO check if needed
-    char *code_start;
+    byte_file  *byteFile;
+    char       *ip;
+    char       *code_start;
     const char *code_end;
 } interpreter_state;
 
@@ -586,7 +585,22 @@ void exec_call() {
 
 void exec_callc() {
     u_int32_t n_args = get_next_int();
-    char *callee = (char *) Belem((u_int32_t *) __gc_stack_top[n_args], BOX(0));
+
+    // Stack should have at least n arguments + closure itself
+    if (stack_fp - __gc_stack_top < n_args + 1) {
+        runtime_error("CALLC: stack underflow: need %d args + closure, but only %d elements available",
+                      n_args, (int)(stack_fp - __gc_stack_top));
+    }
+
+    // Closure is stored below args (n_args from top)
+    u_int32_t closure_val = __gc_stack_top[n_args];
+    if (!IS_CLOSURE(closure_val)) {
+        runtime_error("CALLC: first operand must be a closure, got %s", type_name(closure_val));
+    }
+
+    char *callee = (char *) Belem((u_int32_t *) closure_val, BOX(0));
+
+    // Pushes the returned value onto stack
     reverse_on_stack(n_args);
     vstack_push((u_int32_t) interpreterState.ip);
     vstack_push(n_args + 1);
@@ -639,7 +653,7 @@ void init_interpreter(byte_file *bf) {
     stack_fp = __gc_stack_top;
     vstack_push(0); // argv
     vstack_push(0); // argc
-    vstack_push(2); // dummys? TODO
+    vstack_push(2); // dummys
 
     interpreterState.byteFile = bf;
     interpreterState.code_start = bf->code_ptr;
