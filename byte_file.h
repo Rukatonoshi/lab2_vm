@@ -11,15 +11,15 @@ typedef struct {
     char *string_ptr;                // A pointer to the beginning of the string table
     u_int32_t *public_ptr;           // A pointer to the beginning of publics table
     char *code_ptr;                  // A pointer to the bytecode itself
-    u_int32_t string_table_size;     // The size of the string table (byte)
-    u_int32_t global_area_size;      // The size of global area (word)
-    u_int32_t public_symbols_number; // The number of public symbols
+    int32_t string_table_size;       // The size of the string table (byte)
+    int32_t global_area_size;        // The size of global area (word)
+    int32_t public_symbols_number;   // The number of public symbols
     u_int32_t code_size;             // The size of the bytecode (byte)
     char buffer[0];
 } byte_file;
 
 // Reads a bynary bytecode file by name and runs some checks
-byte_file *read_file(char *file_name) {
+byte_file *read_file(const char *file_name) {
     // 2GB file size limitation for fopen
     FILE *f = fopen(file_name, "rb");
 
@@ -46,23 +46,14 @@ byte_file *read_file(char *file_name) {
 
     // Rewind and read header (first three 32-bit values)
     rewind(f);
-    u_int32_t header[3];
-    if (fread(header, sizeof(u_int32_t), 3, f) != 3) {
+    int32_t header[3];
+    if (fread(header, sizeof(int32_t), 3, f) != 3) {
         failure("Failed to read header: %s\n", strerror(errno));
     }
 
-    u_int32_t string_table_size = header[0];
-    u_int32_t global_area_size = header[1];
-    u_int32_t public_symbols_number = header[2];
-
-    // Sanity checks for header values
-    if (string_table_size > 100 * 1024 * 1024 ||  // 100 MB
-        global_area_size  > 10 * 1024 * 1024 ||   // 10 million words
-        public_symbols_number > 1000000)          // 1 million symbols
-    {
-        failure("Header values too large: string_table=%u, global_area=%u, publics=%u\n",
-                string_table_size, global_area_size, public_symbols_number);
-    }
+    int32_t string_table_size = header[0];
+    int32_t global_area_size = header[1];
+    int32_t public_symbols_number = header[2];
 
     // Checks for header fields values
     if (string_table_size < 0 ||
@@ -115,6 +106,19 @@ byte_file *read_file(char *file_name) {
     {
         free(bf);
         failure("Internal error: pointers exceed buffer bounds\n");
+    }
+
+    if ((char *) bf->public_ptr + public_table_size > buffer_end) {
+        free(bf);
+        failure("Public symbols table exceeds file bounds (public_symbols_number=%u)", public_symbols_number);
+    }
+    if (bf->string_ptr + bf->string_table_size > buffer_end) {
+        free(bf);
+        failure("String table exceeds file bounds (string_table_size=%u)", string_table_size);
+    }
+    if (bf->code_ptr + code_size > buffer_end) {
+        free(bf);
+        failure("Code block exceeds file bounds (code_size=%u)", code_size);
     }
 
     // Store code_size in structure for future bounds checks
