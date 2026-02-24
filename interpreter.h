@@ -122,8 +122,8 @@ static void runtime_error(const char *fmt, ...) {
 // Check that we have required bytes remaining in the code section
 static inline void check_code_bounds(size_t bytes_to_read) {
     if (interpreterState.ip + bytes_to_read > interpreterState.code_end) {
-        failure("Requested value is out of bounds:\nip=%p\nbytes=%zu\ncode_end=%p",
-                *interpreterState.ip, bytes_to_read, *interpreterState.code_end);
+        runtime_error("Requested value is out of bounds:\nip=%p\nbytes=%zu\ncode_end=%p",
+                      *interpreterState.ip, bytes_to_read, *interpreterState.code_end);
     }
 }
 
@@ -147,14 +147,14 @@ static inline char *get_next_string() {
 
 static inline void vstack_push(u_int32_t value) {
     if (stack_start == __gc_stack_top) {
-        failure("Severity ERROR: Virtual stack limit exceeded.\n");
+        runtime_error("ERROR: Virtual stack limit exceeded.");
     }
     *(--__gc_stack_top) = value;
 }
 
 static inline u_int32_t vstack_pop() {
     if (__gc_stack_top >= stack_fp) {
-        failure("Severity ERROR: Illegal pop.\n");
+        runtime_error("ERROR: Illegal pop.");
     }
     return *(__gc_stack_top++);
 }
@@ -282,7 +282,7 @@ void exec_binop(u_int8_t bytecode) {
         case AND:           result = a && b; break;
         case OR:            result = a || b; break;
         default:
-            failure("Unknown binop bytecode: %d", low_bits(bytecode));
+            runtime_error("Unknown binop bytecode: %d", low_bits(bytecode));
     }
 
     vstack_push(BOX(result));
@@ -340,7 +340,7 @@ void exec_patt(u_int8_t bytecode) {
             break;
         }
         default: {
-            failure("Severity RUNTIME: Unknown pattern type.\n");
+            runtime_error("ERROR: Unknown pattern type.\n");
         }
     }
     vstack_push(result);
@@ -368,7 +368,7 @@ void exec_sexp() {
 
 void exec_sta() {
     u_int32_t value = vstack_pop();
-    u_int32_t idx_val = vstack_pop();
+    int32_t idx_val = vstack_pop(); //signed
 
     // The operation is overloaded;
     // its behavior depends on the second-to-top value on the stack, which must be either
@@ -498,7 +498,7 @@ void exec_closure() {
 }
 
 void exec_elem() {
-    u_int32_t index = vstack_pop();
+    int32_t index = vstack_pop(); //signed
     void *obj = (void *) vstack_pop();
 
     if (!IS_AGGREGATIVE(obj)) {
@@ -533,12 +533,11 @@ void exec_elem() {
 }
 
 void exec_begin() {
-    u_int32_t n_args = get_next_int();
-    u_int32_t n_locals = get_next_int();
+    int32_t n_args = get_next_int();   // signed
+    int32_t n_locals = get_next_int(); // signed
 
-    if (n_args < 0) failure("ERROR: BEGIN has negative number of arguments:  %d", n_args);
-    if (n_locals < 0) failure("ERROR: BEGIN has negative number of locals:  %d", n_locals);
-
+    if (n_args < 0) runtime_error("ERROR: BEGIN has negative number of arguments: %d", n_args);
+    if (n_locals < 0) runtime_error("ERROR: BEGIN has negative number of locals: %d", n_locals);
     vstack_push((u_int32_t) stack_fp);
     vstack_push(current_frame_locals);
     //DEBUG
@@ -553,11 +552,11 @@ void exec_begin() {
 }
 
 void exec_cbegin() {
-    u_int32_t n_args = get_next_int();
-    u_int32_t n_locals = get_next_int();
+    int32_t n_args = get_next_int(); // signed
+    int32_t n_locals = get_next_int(); // signed
 
-    if (n_args < 0) failure("ERROR: BEGIN has negative number of arguments:  %d", n_args);
-    if (n_locals < 0) failure("ERROR: BEGIN has negative number of locals:  %d", n_locals);
+    if (n_args < 0) runtime_error("ERROR: BEGIN has negative number of arguments: %d", n_args);
+    if (n_locals < 0) runtime_error("ERROR: BEGIN has negative number of locals: %d", n_locals);
 
     vstack_push((u_int32_t) stack_fp);
     vstack_push(current_frame_locals);
@@ -614,7 +613,7 @@ void exec_array() {
 void exec_fail() {
     u_int32_t a = get_next_int();
     u_int32_t b = get_next_int();
-    failure("Severity RUNTIME: Failed executing FAIL %d %d.\n", a, b);
+    runtime_error("ERROR: Failed executing FAIL %d %d.", a, b);
 }
 
 void exec_line() {
@@ -662,7 +661,7 @@ void exec_callc() {
 static inline char* find_main_entrypoint(byte_file *bf, const char *code_end) {
     // Check public symbols
     if (bf->public_symbols_number == 0) {
-        failure("No public symbols in bytecode file\n");
+        runtime_error("No public symbols in bytecode file");
     }
 
     for (u_int32_t i = 0; i < bf->public_symbols_number; i++) {
@@ -673,7 +672,7 @@ static inline char* find_main_entrypoint(byte_file *bf, const char *code_end) {
 
             // Check that the entry point lies within the code bounds
             if (entry < bf->code_ptr || entry >= code_end) {
-                failure("'main' offset %u points outside code section "
+                runtime_error("'main' offset %u points outside code section "
                         "(code bounds: [%p, %p))\n",
                         offset, (void*)bf->code_ptr, (void*)code_end);
             }
@@ -682,20 +681,19 @@ static inline char* find_main_entrypoint(byte_file *bf, const char *code_end) {
     }
 
     // Print first few public symbols for debug
-    fprintf(stderr, "Main not found. Available symbols (%u total):\n",
-            bf->public_symbols_number);
+    runtime_error("Main not found. Available symbols (%u total):", bf->public_symbols_number);
     for (u_int32_t i = 0; i < bf->public_symbols_number && i < 10; i++) {
         fprintf(stderr, "  '%s'\n", get_public_name(bf, i));
     }
 
-    failure("Required public symbol 'main' not found\n");
+    runtime_error("Required public symbol 'main' not found\n");
     return NULL; // unreachable
 }
 
 void init_interpreter(byte_file *bf) {
     stack_start = malloc(RUNTIME_VSTACK_SIZE * sizeof(u_int32_t));
     if (stack_start == NULL) {
-        failure("Severity ERROR: Failed to allocate memory for virtual stack.\n");
+        runtime_error("ERROR: Failed to allocate memory for virtual stack.");
     }
     // init __gc_stack_bottom and __gc_stack_top for detection of lama GC and call extern __gc__init
     __gc_stack_bottom = stack_start + RUNTIME_VSTACK_SIZE;
@@ -773,13 +771,13 @@ void interpret() {
             EXEC(CLOSURE, closure)
             EXEC(SWAP, swap)
             case STI:
-                failure("Severity RUNTIME: STI bytecode is deprecated.\n");
+                runtime_error("ERROR: STI bytecode is deprecated.\n");
                 break;
             case RET:
-                failure("Severity RUNTIME: RET bytecode has UB.\n");
+                runtime_error("ERROR: RET bytecode has UB.\n");
                 break;
             default:
-                failure("Severity ERROR: Unknown bytecode type.\n");
+                runtime_error("ERROR: Unknown bytecode type.\n");
         }
     } while (interpreterState.ip != 0);
 #undef EXEC_WITH_LOWER_BITS
