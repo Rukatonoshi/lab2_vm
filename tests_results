@@ -1,0 +1,672 @@
+lamac exists
+Running regression/test001.lama...
+ >  > 90
+test passed
+Running regression/test002.lama...
+ >  > 41
+test passed
+Running regression/test003.lama...
+ >  > 7
+3
+1
+test passed
+Running regression/test004.lama...
+ >  > 10
+test passed
+Running regression/test005.lama...
+ >  > 11
+test passed
+Running regression/test006.lama...
+ >  > 1
+1
+0
+1
+0
+0
+test passed
+Running regression/test007.lama...
+-4
+test passed
+Running regression/test008.lama...
+-45
+test passed
+Running regression/test009.lama...
+1024
+test passed
+Running regression/test010.lama...
+499950
+test passed
+Running regression/test011.lama...
+2
+test passed
+Running regression/test012.lama...
+ > 0
+0
+0
+1
+1
+0
+1
+1
+test passed
+Running regression/test013.lama...
+ > 10
+11
+10
+11
+3
+2
+1
+0
+test passed
+Running regression/test014.lama...
+ > 1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+test passed
+Running regression/test015.lama...
+ > 7919
+test passed
+Running regression/test016.lama...
+ > 3628800
+test passed
+Running regression/test017.lama...
+ > 6765
+test passed
+Running regression/test018.lama...
+ > 2
+0
+3
+4
+5
+0
+7
+0
+11
+0
+13
+0
+17
+2
+test passed
+Running regression/test019.lama...
+499950
+test passed
+Running regression/test020.lama...
+ > 7919
+test passed
+Running regression/test021.lama...
+ > 3628800
+test passed
+Running regression/test022.lama...
+ > 6765
+test passed
+Running regression/test023.lama...
+ >  >  >  >  >  > 35
+test passed
+Running regression/test024.lama...
+ > 3
+8
+test passed
+Running regression/test025.lama...
+ > 1
+100
+200
+300
+2
+100
+200
+300
+3
+100
+200
+300
+test passed
+Running regression/test026.lama...
+ > 1
+100
+200
+300
+100
+200
+300
+2
+100
+200
+300
+100
+200
+300
+3
+100
+200
+300
+100
+200
+300
+test passed
+Running regression/test027.lama...
+ > 1
+100
+200
+300
+1
+2
+100
+200
+300
+3
+100
+200
+300
+3
+4
+100
+200
+300
+5
+100
+200
+300
+5
+100
+200
+300
+100
+200
+300
+100
+200
+300
+100
+200
+300
+test passed
+Running regression/test028.lama...
+ > 7
+5040
+6
+720
+5
+120
+4
+24
+3
+6
+2
+2
+1
+1
+test passed
+Running regression/test029.lama...
+ > 9
+55
+8
+34
+7
+21
+6
+13
+5
+8
+4
+5
+3
+3
+2
+2
+1
+1
+test passed
+Running regression/test034.lama...
+ > 97
+98
+99
+100
+101
+102
+103
+104
+99
+100
+101
+102
+103
+104
+105
+106
+test passed
+Running regression/test036.lama...
+ > 97
+98
+99
+100
+101
+102
+103
+104
+97
+97
+97
+97
+97
+97
+97
+97
+test passed
+Running regression/test040.lama...
+ > 1
+2
+3
+4
+test passed
+Running regression/test041.lama...
+ > 600
+1800
+test passed
+Running regression/test042.lama...
+ > 0
+1
+2
+3
+4
+4
+4
+4
+4
+4
+test passed
+Running regression/test045.lama...
+ > 49
+34
+97
+98
+99
+34
+91
+93
+91
+49
+44
+32
+50
+44
+32
+51
+93
+67
+111
+110
+115
+32
+40
+49
+44
+32
+67
+111
+110
+115
+32
+40
+50
+44
+32
+78
+105
+108
+41
+41
+test passed
+Running regression/test046.lama...
+ > 3
+3
+3
+1
+2
+3
+5
+5
+1
+2
+3
+4
+5
+test passed
+Running regression/test050.lama...
+ > 2
+test passed
+Running regression/test059.lama...
+ > 0
+1
+2
+test passed
+Running regression/test063.lama...
+ > 100
+200
+test passed
+Running regression/test072.lama...
+ > 9
+55
+8
+34
+7
+21
+6
+13
+5
+8
+4
+5
+3
+3
+2
+2
+1
+1
+test passed
+Running regression/test073.lama...
+ > 7
+5040
+6
+720
+5
+120
+4
+24
+3
+6
+2
+2
+1
+1
+test passed
+Running regression/test074.lama...
+ > 1
+2
+3
+4
+5
+6
+7
+8
+9
+2
+3
+4
+5
+6
+7
+8
+9
+10
+3
+5
+7
+9
+11
+13
+15
+17
+19
+5
+13
+29
+61
+125
+253
+509
+1021
+2045
+test passed
+Running regression/test077.lama...
+ > 5
+6
+7
+8
+9
+10
+test passed
+Running regression/test078.lama...
+ > 1
+2
+3
+4
+1
+2
+3
+4
+3
+4
+1
+2
+test passed
+Running regression/test079.lama...
+ > 1
+1
+1
+1
+0
+0
+test passed
+Running regression/test080.lama...
+ > 0
+100
+300
+test passed
+Running regression/test081.lama...
+ > 1
+2
+3
+100
+200
+300
+test passed
+Running regression/test082.lama...
+ > 1
+1
+1
+1
+1
+2
+3
+100
+3
+2
+1
+6
+5
+4
+3
+2
+1
+test passed
+Running regression/test083.lama...
+ > 7
+7
+28
+test passed
+Running regression/test084.lama...
+ > 55
+310
+310
+test passed
+Running regression/test085.lama...
+ > 0
+15
+15
+1
+2
+3
+4
+5
+test passed
+Running regression/test086.lama...
+ > 1
+2
+3
+test passed
+Running regression/test088.lama...
+0
+3
+test passed
+Running regression/test089.lama...
+ >  >  > 8
+test passed
+Running regression/test090.lama...
+ > 6
+7
+8
+test passed
+Running regression/test091.lama...
+ > 1
+2
+3
+2
+3
+4
+3
+4
+5
+test passed
+Running regression/test092.lama...
+ > 1
+1
+1
+1
+0
+test passed
+Running regression/test093.lama...
+ > 11
+18
+test passed
+Running regression/test094.lama...
+ > 5
+7
+12
+-2
+test passed
+Running regression/test095.lama...
+ > 5
+test passed
+Running regression/test096.lama...
+ > 2
+1
+test passed
+Running regression/test097.lama...
+ > 35
+test passed
+Running regression/test098.lama...
+ > 12
+test passed
+Running regression/test099.lama...
+ > 1
+800
+800
+test passed
+Running regression/test100.lama...
+ > 0
+test passed
+Running regression/test101.lama...
+ > 0
+test passed
+Running regression/test102.lama...
+ > 5
+test passed
+Running regression/test103.lama...
+ >  >  > 5
+test passed
+Running regression/test104.lama...
+ > 0
+1
+2
+3
+4
+5
+6
+7
+8
+9
+test passed
+Running regression/test105.lama...
+ > 3
+test passed
+Running regression/test106.lama...
+ > 1
+2
+test passed
+Running regression/test107.lama...
+ > 0
+test passed
+Running regression/test112.lama...
+1
+2
+5
+6
+7
+8
+5
+6
+7
+8
+3
+test passed
+Running regression/test801.lama...
+1
+2
+3
+4
+5
+test passed
+Running regression/test802.lama...
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+test passed
+Running regression/test803.lama...
+1
+2
+3
+4
+5
+6
+Runtime error at offset 469 (0x1d5): Lwrite expected integer, got closure
+test failed! expected output:
+Fatal error: exception Failure("int value expected (Closure ([\"unit\"], <not supported>, <not supported>))\n")
+result: 75 passed, 1 failed
+failed tests: test803.lama
