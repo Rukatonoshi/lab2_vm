@@ -508,13 +508,19 @@ void exec_call_array() {
 void exec_closure() {
     u_int32_t ip = get_next_int();
     u_int32_t bn = get_next_int();
-    u_int32_t values[bn];
-    for (int i = 0; i < bn; ++i) {
+    u_int32_t *values = (u_int32_t *) malloc(bn * sizeof(u_int32_t));
+    if (!values) {
+        runtime_error("CLOSURE: out of memory while allocating %u captured values", bn);
+    }
+
+    for (u_int32_t i = 0; i < bn; ++i) {
         u_int8_t b = (u_int8_t) get_next_byte();
         u_int32_t value = (u_int32_t) get_next_int();
         values[i] = *get_by_loc(b, value);
     }
+
     u_int32_t bclosure = (u_int32_t) Bclosure_my(BOX(bn), interpreterState.byteFile->code_ptr + ip, (int*) values);
+    free(values);
     vstack_push(bclosure);
 }
 
