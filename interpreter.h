@@ -64,12 +64,33 @@ typedef struct {
 # define CLOSURE_TAG 0x00000007
 # define TAG(x)  (x & 0x00000007)
 
-// Macroses to check type of value
-#define IS_STRING(val) (!UNBOXED(val) && TAG(TO_DATA(val)->tag) == STRING_TAG)
-#define IS_ARRAY(val) (!UNBOXED(val) && TAG(TO_DATA(val)->tag) == ARRAY_TAG)
-#define IS_SEXP(val) (!UNBOXED(val) && TAG(TO_DATA(val)->tag) == SEXP_TAG)
-#define IS_CLOSURE(val) (!UNBOXED(val) && TAG(TO_DATA(val)->tag) == CLOSURE_TAG)
-#define IS_AGGREGATIVE(val) (IS_STRING(val) || IS_ARRAY(val) || IS_SEXP(val))
+// Check, if given value matches wanted tag
+static inline bool check_tag(u_int32_t val, u_int32_t wanted_tag) {
+    if (UNBOXED(val)) return false;
+
+    data *d = TO_DATA((void *)val);
+    return TAG(d->tag) == wanted_tag;
+}
+
+static inline bool is_string(u_int32_t val) {
+    return check_tag(val, STRING_TAG);
+}
+
+static inline bool is_array(u_int32_t val) {
+    return check_tag(val, ARRAY_TAG);
+}
+
+static inline bool is_sexp(u_int32_t val) {
+    return check_tag(val, SEXP_TAG);
+}
+
+static inline bool is_closure(u_int32_t val) {
+    return check_tag(val, CLOSURE_TAG);
+}
+
+static inline bool is_aggregative(u_int32_t val) {
+    return is_string(val) || is_array(val) || is_sexp(val);
+}
 
 // Returns type of stringified(?) value
 static const char* type_name(u_int32_t val) {
@@ -381,7 +402,7 @@ void exec_sta() {
 
     // Check if obj type is aggregative (string/array/sexp)
     u_int32_t obj = vstack_pop();
-    if (!IS_AGGREGATIVE(obj)) {
+    if (!is_aggregative(obj)) {
         runtime_error("STA expected aggregative (string/array/sexp), got %s",
                       type_name(value));
     }
@@ -469,7 +490,7 @@ void exec_call_string() {
 
 void exec_call_length() {
     u_int32_t arg = vstack_pop();
-    if (!IS_AGGREGATIVE(arg)) {
+    if (!is_aggregative(arg)) {
         runtime_error("Llength expected string, array or sexp, got %s", type_name(arg));
     }
     u_int32_t l = (u_int32_t) Llength((void *) arg);
@@ -501,7 +522,7 @@ void exec_elem() {
     int32_t index = vstack_pop(); //signed
     void *obj = (void *) vstack_pop();
 
-    if (!IS_AGGREGATIVE(obj)) {
+    if (!is_aggregative((u_int32_t) obj)) {
         runtime_error("ELEM expected aggregative (string/array/sexp), got %s",
                       type_name((u_int32_t) obj));
     }
@@ -644,7 +665,7 @@ void exec_callc() {
 
     // Closure is stored below args (n_args from top)
     u_int32_t closure_val = __gc_stack_top[n_args];
-    if (!IS_CLOSURE(closure_val)) {
+    if (!is_closure(closure_val)) {
         runtime_error("CALLC: first operand must be a closure, got %s", type_name(closure_val));
     }
 
