@@ -1,0 +1,6 @@
+fun f (a, b, c, d, e) {
+    var i = d / b;
+    var f = a + b;
+}
+
+f (1, 0, 3, 4, 5)

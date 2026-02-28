@@ -6,13 +6,16 @@ RUNTIME_DIR = src/runtime
 
 all: $(TARGET)
 
-$(TARGET): gc_runtime.o runtime.o interpreter.o main.o
+$(TARGET): gc_runtime.o runtime.o interpreter.o frequency_analyzer.o main.o
 	$(CC) $(COMMON_FLAGS) $^ -o $@
 
 gc_runtime.o: $(RUNTIME_DIR)/gc_runtime.s
 	$(CC) $(COMMON_FLAGS) -c $< -o $@
 
 runtime.o: $(RUNTIME_DIR)/runtime.c $(RUNTIME_DIR)/runtime.h
+	$(CC) $(COMMON_FLAGS) -c $< -o $@
+
+frequency_analyzer.o: src/frequency_analyzer.c src/frequency_analyzer.h src/uthash.h
 	$(CC) $(COMMON_FLAGS) -c $< -o $@
 
 interpreter.o: src/interpreter.c src/interpreter.h

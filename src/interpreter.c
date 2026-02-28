@@ -1,8 +1,4 @@
 #include "interpreter.h"
-//#include <stdio.h>
-//#include <stdlib.h>
-//#include <stdarg.h>
-//#include <string.h>
 
 static size_t RUNTIME_VSTACK_SIZE = 1024 * 1024;
 static u_int32_t *stack_fp;
