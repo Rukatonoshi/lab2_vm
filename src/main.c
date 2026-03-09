@@ -10,11 +10,12 @@ int main(int argc, char *argv[]) {
         failure("Usage: %s [analyze] <bytecode_file>\n", argv[0]);
     }
 
-    byte_file *bf = read_file(argv[2]);
     if (strcmp(argv[1], "analyze") == 0) {
+        byte_file *bf = read_file(argv[2]);
         analyze_frequency(bf);
         free(bf);
     } else {
+        byte_file *bf = read_file(argv[1]);
         init_interpreter(bf);
         interpret();
         free(bf);
