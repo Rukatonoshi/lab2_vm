@@ -7,6 +7,7 @@
 
 #include "byte_file.h"
 #include "bytecode_decoder.h"
+#include "frequency_analyzer.h"
 
 // Error handling
 static void fatal_error(const char *fmt, ...) {
@@ -21,20 +22,49 @@ static void fatal_error(const char *fmt, ...) {
 // Instruction decoding and printing
 typedef struct {
     bytecode_type opcode;      // main opcode type (CONST, BINOP, ...)
-    u_int8_t subtype;           // for groups: operation or location type
-    u_int32_t params[32];       // parameters (enough for CLOSURE)
+    u_int8_t subtype;          // for groups: operation or location type
+    u_int32_t *params;         // parameters (enough for CLOSURE)
     size_t param_count;        // number of parameters stored
+    size_t param_capacity;     // current params memory usage
     size_t length;             // total length in bytes
 } InstrInfo;
 
+static bool init_instr_info(InstrInfo *info, size_t initial_capacity) {
+    info->params = (u_int32_t*)calloc(initial_capacity, sizeof(u_int32_t));
+    if (!info->params) return false;
+    info->param_count = 0;
+    info->param_capacity = initial_capacity;
+    info->length = 0;
+    return true;
+}
+
+static void free_instr_info(InstrInfo *info) {
+    free(info->params);
+    info->params = NULL;
+    info->param_count = 0;
+    info->param_capacity = 0;
+    info->length = 0;
+}
+
+static bool ensure_capacity(InstrInfo *info, size_t needed) {
+    if (info->param_capacity >= needed) return true;
+    size_t new_capacity = info->param_capacity * 2;
+    while (new_capacity < needed) new_capacity *= 2;
+    u_int32_t *new_params = (u_int32_t*)realloc(info->params, new_capacity * sizeof(u_int32_t));
+    if (!new_params) return false;
+    info->params = new_params;
+    info->param_capacity = new_capacity;
+    return true;
+}
+
 static bool decode_instruction(const u_int8_t *code, size_t max_len, u_int32_t addr, InstrInfo *info) {
     if (max_len < 1) return false;
+
     u_int8_t first = code[0];
     u_int8_t h = high_bits(first);
     u_int8_t l = low_bits(first);
     size_t pos = 1;
 
-    // Determine main opcode and subtype
     bytecode_type type;
     if (h == BINOP_HIGH_BITS) {
         type = BINOP;
@@ -54,37 +84,19 @@ static bool decode_instruction(const u_int8_t *code, size_t max_len, u_int32_t a
     } else {
         type = (bytecode_type)first;
         info->subtype = 0;
-        // BEGIN and CBEGIN (0x52 & 0x53) have the same structure
         if (first == BEGIN + 1) {
             type = BEGIN;
         }
     }
+
     info->opcode = type;
-    // DEBUG
-//    printf("DEBUG: addr offset=0x%02x first=0x%02x type=%d subtype=%d\n",
-//       addr, first, info->opcode, info->subtype, code);
-
-    // Helper macros to read integers and bytes
-    #define READ_INT() do { \
-        if (pos + 4 > max_len) return false; \
-        u_int32_t val = (u_int32_t)code[pos] | ((u_int32_t)code[pos+1]<<8) | \
-                       ((u_int32_t)code[pos+2]<<16) | ((u_int32_t)code[pos+3]<<24); \
-        if (info->param_count >= 32) return false; \
-        info->params[info->param_count++] = val; \
-        pos += 4; \
-    } while(0)
-
-    #define READ_BYTE() do { \
-        if (pos + 1 > max_len) return false; \
-        u_int8_t b = code[pos]; \
-        if (info->param_count >= 32) return false; \
-        info->params[info->param_count++] = b; \
-        pos += 1; \
-    } while(0)
-
     info->param_count = 0;
+
+    // Dynamic allocation
+    if (!init_instr_info(info, 8)) return false; // base capacity 8
+
+    // Стандартные операции
     switch (type) {
-        // Instructions without parameters
         case BINOP:
         case PATT:
         case DROP: case DUP: case SWAP: case ELEM:
@@ -92,11 +104,11 @@ static bool decode_instruction(const u_int8_t *code, size_t max_len, u_int32_t a
         case CALL_READ: case CALL_WRITE: case CALL_LENGTH: case CALL_STRING:
         case STA: case STI:
             break;
+
         case CALL_ARRAY:
             READ_INT();
             break;
 
-        // One 32‑bit parameter
         case CONST:
         case XSTRING:
         case JMP:
@@ -106,45 +118,46 @@ static bool decode_instruction(const u_int8_t *code, size_t max_len, u_int32_t a
             READ_INT();
             break;
 
-        // LD, LDA, ST – one index
         case LD: case LDA: case ST:
             READ_INT();
             break;
 
-        // Two ints
         case SEXP:
             READ_INT(); // string index
             READ_INT(); // arity
             break;
-        // TODO check Begin
+
         case BEGIN:
         case CBEGIN:
             READ_INT(); // n_args
             READ_INT(); // n_locals
             break;
+
         case CALL:
             READ_INT(); // target offset
             READ_INT(); // n_args
             break;
+
         case TAG:
             READ_INT(); // string index
             READ_INT(); // n
             break;
+
         case FAIL:
             READ_INT(); // line
             READ_INT(); // column
             break;
+
         case ARRAY:
         case CALLC:
             READ_INT();
             break;
 
-        // CLOSURE: ip, bn, then bn pairs (byte + int)
         case CLOSURE:
             READ_INT(); // ip
             READ_INT(); // bn
             {
-                u_int32_t bn = info->params[info->param_count-1]; // last read
+                u_int32_t bn = info->params[info->param_count - 1];
                 for (u_int32_t i = 0; i < bn; i++) {
                     READ_BYTE(); // location type
                     READ_INT();  // index
@@ -153,7 +166,7 @@ static bool decode_instruction(const u_int8_t *code, size_t max_len, u_int32_t a
             break;
 
         default:
-            // Unknown opcode – treat as error
+            free_instr_info(info);
             return false;
     }
 
@@ -302,7 +315,7 @@ static void print_sequence(FILE *out, const u_int8_t *data, size_t len) {
 #include "uthash.h"
 
 typedef struct {
-    char *bytes;            // copy of the byte sequence
+    const u_int8_t *bytes;            // copy of the byte sequence
     size_t len;
     u_int32_t count;
     UT_hash_handle hh;
@@ -314,9 +327,9 @@ static void increment_count(const u_int8_t *data, size_t len) {
     CountEntry *entry;
     HASH_FIND(hh, counts, data, len, entry);
     if (!entry) {
+        if (HASH_COUNT(counts) >= MAX_UNIQUE_SEQUENCES) return; // limitation on number of unique sequences
         entry = (CountEntry*)malloc(sizeof(CountEntry));
-        entry->bytes = (char*)malloc(len);
-        memcpy(entry->bytes, data, len);
+        entry->bytes = data;
         entry->len = len;
         entry->count = 0;
         HASH_ADD_KEYPTR(hh, counts, entry->bytes, len, entry);
@@ -484,7 +497,6 @@ void analyze_frequency(byte_file *bf) {
     // Cleanup
     HASH_ITER(hh, counts, entry, tmp) {
         HASH_DEL(counts, entry);
-        free(entry->bytes);
         free(entry);
     }
     free(array);
