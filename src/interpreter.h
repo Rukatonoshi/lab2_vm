@@ -1,8 +1,9 @@
 #pragma once
 
-#include "bytecode_decoder.h"
+#include "../include/instructions.h"
 #include "byte_file.h"
 #include <stdbool.h>
+#include <sys/types.h>
 
 extern int Lread();
 extern int Lwrite(int);

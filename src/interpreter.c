@@ -22,6 +22,66 @@ static void runtime_error(const char *fmt, ...) {
     exit(EXIT_FAILURE);
 }
 
+// Addressing mode resolution function, for LD, LDA, ST and Closure
+uint32_t *resolve_address(addr_mode_t mode, uint32_t index) {
+    switch (mode) {
+        case ADDR_GLOBAL:
+            // Access global variable by index
+            if (index >= interpreterState.byteFile->global_area_size) {
+                runtime_error("Global index %u out of bounds (size %u)",
+                              index, interpreterState.byteFile->global_area_size);
+            }
+            return interpreterState.globals_base + index;
+
+        case ADDR_LOCAL:
+            // Access local variable from current stack frame
+            if (index >= current_frame_locals) {
+                runtime_error("Local index %u out of bounds (locals=%u)",
+                              index, current_frame_locals);
+            }
+            return stack_fp - index - 2;
+
+        case ADDR_ARGUMENT: {
+            // Access function argument from current stack frame
+            uint32_t n_args = *(stack_fp + 1);
+            if (index >= n_args) {
+                runtime_error("Argument index %u out of bounds (args=%u)",
+                              index, n_args);
+            }
+            return stack_fp + index + 3;
+        }
+
+        case ADDR_CLOSURE: {
+            // Access captured variable within closure
+            uint32_t n_args = *(stack_fp + 1);
+            uint32_t *argument = stack_fp + n_args + 2;
+            uint32_t closure_val = *argument;
+
+            if (closure_val == 0) {
+                runtime_error("CLOSURE: null closure");
+            }
+
+            data *d = TO_DATA((void *) closure_val);
+            if (TAG(d->tag) != CLOSURE_TAG) {
+                runtime_error("CLOSURE: not a closure");
+            }
+
+            uint32_t total_words = d->tag >> 3; // n+1, n - num of captured variables
+            uint32_t n_captured = total_words - 1;
+
+            if (index >= n_captured) {
+                runtime_error("CLOSURE: index %u out of bounds (captured=%u)",
+                              index, n_captured);
+            }
+
+            return (uint32_t *) Belem_link((void *) closure_val, BOX(index + 1));
+        }
+
+        default:
+            runtime_error("Invalid addressing mode: %d", mode);
+    }
+}
+
 // Check that we have required bytes remaining in the code section
 static inline void check_code_bounds(size_t bytes_to_read) {
     if (interpreterState.ip + bytes_to_read > interpreterState.code_end) {
@@ -80,54 +140,16 @@ static inline void reverse_on_stack(int count) {
     }
 }
 
-static u_int32_t *get_by_loc(u_int8_t bytecode, u_int32_t value) {
-    switch (low_bits(bytecode)) {
-        case L_GLOBAL:
-            if (value >= interpreterState.byteFile->global_area_size) {
-                runtime_error("Global index %u out of bounds (size %u)",
-                              value, interpreterState.byteFile->global_area_size);
-            }
-            return interpreterState.globals_base + value;
-        case L_LOCAL:
-            if (value >= current_frame_locals) {
-                runtime_error("Local index %u out of bounds (current frame has %u locals)",
-                              value, current_frame_locals);
-            }
-            return stack_fp - value - 2;
-        case L_ARGUMENT:
-            u_int32_t n_args = *(stack_fp + 1);
-            if (value >= n_args) {
-                runtime_error("Argument index %u out of bounds (current call has %u args)",
-                              value, n_args);
-            }
-            return stack_fp + value + 3;
-        case L_CLOSURE: {
-            u_int32_t n_args = *(stack_fp + 1);
-            u_int32_t *argument = stack_fp + n_args + 2;
-            u_int32_t *closure_val = (u_int32_t *) *argument;
-            if (closure_val == NULL) {
-                runtime_error("CLOSURE: null closure encountered");
-            }
-            // Check if it's closure
-            data *d = TO_DATA((void *) closure_val);
-            if (TAG(d->tag) != CLOSURE_TAG) {
-                runtime_error("CLOSURE: object is not a closure");
-            }
-            // Closure size with entry
-            u_int32_t total_words = d->tag >> 3; // n+1, n - num of captured variables
-            u_int32_t n_captured = total_words - 1;
-            if (value >= n_captured) {
-                runtime_error("CLOSURE: index %u out of bounds (captured variables: %u)",
-                              value, n_captured);
-            }
-            return (u_int32_t *) Belem_link((void *) closure_val, BOX(value + 1));
-        }
-        default:
-            runtime_error("Invalid location type %d", low_bits(bytecode));
+static uint32_t *get_by_loc(u_int8_t bytecode, uint32_t index) {
+    // Validate this is an addressing instruction (LD, LDA, ST groups)
+    uint8_t high = high_bits(bytecode);
+    if (high != HIGH_BITS_LD && high != HIGH_BITS_LDA && high != HIGH_BITS_ST) {
+        runtime_error("get_by_loc: invalid opcode=0x%02x (not an addressing instruction)",
+                      bytecode);
     }
 
-    // Should not reach
-    return NULL;
+    // Extract addressing mode from low bits and resolve address
+    return resolve_address((addr_mode_t)low_bits(bytecode), index);
 }
 
 static void jump(u_int32_t ip_offset) {
@@ -222,7 +244,7 @@ void exec_st(u_int8_t bytecode) {
 void exec_patt(u_int8_t bytecode) {
     u_int32_t *element = (u_int32_t *) vstack_pop();
     u_int32_t result = -1;
-    switch (low_bits(bytecode)) {
+    switch (bytecode) {
         case PATT_STR: {
             result = Bstring_patt(element, (u_int32_t *) vstack_pop());
             break;
@@ -252,7 +274,7 @@ void exec_patt(u_int8_t bytecode) {
             break;
         }
         default: {
-            runtime_error("ERROR: Unknown pattern type.\n");
+            runtime_error("ERROR: Unknown pattern type for PATT 0x*%d.\n", low_bits(bytecode));
         }
     }
     vstack_push(result);
@@ -396,9 +418,11 @@ void exec_closure() {
     }
 
     for (u_int32_t i = 0; i < bn; ++i) {
-        u_int8_t b = (u_int8_t) get_next_byte();
+        // The byte is already the addressing mode (0x00-0x03 for G/L/A/C)
+        u_int8_t mode_byte = (u_int8_t) get_next_byte();
         u_int32_t value = (u_int32_t) get_next_int();
-        values[i] = *get_by_loc(b, value);
+        // Directly use the addressing mode to resolve address
+        values[i] = *resolve_address((addr_mode_t)mode_byte, value);
     }
 
     u_int32_t bclosure = (u_int32_t) Bclosure_my(BOX(bn), interpreterState.byteFile->code_ptr + ip, (int*) values);
@@ -633,60 +657,124 @@ void init_interpreter(byte_file *bf) {
 
 void interpret() {
     do {
-        u_int8_t bytecode = get_next_byte();
-        bytecode_type bc_type = get_bytecode_type(bytecode);
-#define EXEC_WITH_LOWER_BITS(BC_NAME, EXEC_SUFFIX) \
-        case BC_NAME:              \
-            exec_##EXEC_SUFFIX(bytecode);  \
-            break;
-#define EXEC(BC_NAME, EXEC_SUFFIX) \
-        case BC_NAME:              \
-            exec_##EXEC_SUFFIX();  \
-            break;
-        switch (bc_type) {
-            // Interpret bytecodes with meaningful lower bits
-            EXEC_WITH_LOWER_BITS(BINOP, binop)
-            EXEC_WITH_LOWER_BITS(LD, ld)
-            EXEC_WITH_LOWER_BITS(LDA, lda)
-            EXEC_WITH_LOWER_BITS(ST, st)
-            EXEC_WITH_LOWER_BITS(PATT, patt)
-            // Interpret other bytecodes
-            EXEC(CONST, const)
-            EXEC(XSTRING, string)
-            EXEC(SEXP, sexp)
-            EXEC(STA, sta)
-            EXEC(JMP, jmp)
-            EXEC(CJMP_Z, cjmp_z)
-            EXEC(CJMP_NZ, cjmp_nz)
-            EXEC(ELEM, elem)
-            EXEC(BEGIN, begin)
-            EXEC(CBEGIN, cbegin)
-            EXEC(CALL, call)
-            EXEC(CALLC, callc)
-            EXEC(CALL_READ, call_read)
-            EXEC(CALL_WRITE, call_write)
-            EXEC(CALL_STRING, call_string)
-            EXEC(CALL_LENGTH, call_length)
-            EXEC(CALL_ARRAY, call_array)
-            EXEC(END, end)
-            EXEC(DROP, drop)
-            EXEC(DUP, dup)
-            EXEC(TAG, tag)
-            EXEC(ARRAY, array)
-            EXEC(FAIL, fail)
-            EXEC(LINE, line)
-            EXEC(CLOSURE, closure)
-            EXEC(SWAP, swap)
-            case STI:
-                runtime_error("ERROR: STI bytecode is deprecated.\n");
+        uint8_t bytecode = get_next_byte();
+        uint8_t high = high_bits(bytecode);
+
+        switch (high) {
+            // Group instruction which defined by high bit
+            case HIGH_BITS_BINOP:  // BINOP group
+                exec_binop(bytecode);
                 break;
-            case RET:
-                runtime_error("ERROR: RET bytecode has UB.\n");
+
+            case HIGH_BITS_LD:  // LD group
+                exec_ld(bytecode);
                 break;
+
+            case HIGH_BITS_LDA:  // LDA group
+                exec_lda(bytecode);
+                break;
+
+            case HIGH_BITS_ST:  // ST group
+                exec_st(bytecode);
+                break;
+
+            case HIGH_BITS_PATT:  // PATT group
+                exec_patt(bytecode);
+                break;
+
             default:
-                runtime_error("ERROR: Unknown bytecode type.\n");
+                // Use direct opcode dispatch for standalone instructions
+                switch (bytecode) {
+                    case BC_TYPE_CONST:
+                        exec_const();
+                        break;
+                    case BC_TYPE_XSTRING:
+                        exec_string();
+                        break;
+                    case BC_TYPE_SEXP:
+                        exec_sexp();
+                        break;
+                    case BC_TYPE_STA:
+                        exec_sta();
+                        break;
+                    case BC_TYPE_JMP:
+                        exec_jmp();
+                        break;
+                    case BC_TYPE_CJMP_ZERO:
+                        exec_cjmp_z();
+                        break;
+                    case BC_TYPE_CJMP_NOT_ZERO:
+                        exec_cjmp_nz();
+                        break;
+                    case BC_TYPE_ELEM:
+                        exec_elem();
+                        break;
+                    case BC_TYPE_BEGIN:
+                        exec_begin();
+                        break;
+                    case BC_TYPE_CBEGIN:
+                        exec_cbegin();
+                        break;
+                    case BC_TYPE_CALL:
+                        exec_call();
+                        break;
+                    case BC_TYPE_CALLC:
+                        exec_callc();
+                        break;
+                    case BC_TYPE_CALL_READ:
+                        exec_call_read();
+                        break;
+                    case BC_TYPE_CALL_WRITE:
+                        exec_call_write();
+                        break;
+                    case BC_TYPE_CALL_STRING:
+                        exec_call_string();
+                        break;
+                    case BC_TYPE_CALL_LENGTH:
+                        exec_call_length();
+                        break;
+                    case BC_TYPE_CALL_ARRAY:
+                        exec_call_array();
+                        break;
+                    case BC_TYPE_END:
+                        exec_end();
+                        break;
+                    case BC_TYPE_DROP:
+                        exec_drop();
+                        break;
+                    case BC_TYPE_DUP:
+                        exec_dup();
+                        break;
+                    case BC_TYPE_TAG:
+                        exec_tag();
+                        break;
+                    case BC_TYPE_ARRAY:
+                        exec_array();
+                        break;
+                    case BC_TYPE_FAIL:
+                        exec_fail();
+                        break;
+                    case BC_TYPE_LINE:
+                        exec_line();
+                        break;
+                    case BC_TYPE_CLOSURE:
+                        exec_closure();
+                        break;
+                    case BC_TYPE_SWAP:
+                        exec_swap();
+                        break;
+                    // Deprecated
+                    case BC_TYPE_STI:
+                        runtime_error("ERROR: STI bytecode is deprecated.\n");
+                        break;
+                    case BC_TYPE_RET:
+                        runtime_error("ERROR: RET bytecode has UB.\n");
+                        break;
+                    default:
+                        runtime_error("ERROR: Unknown opcode 0x%02X\n", bytecode);
+                }
+                break;
         }
+
     } while (interpreterState.ip != 0);
-#undef EXEC_WITH_LOWER_BITS
-#undef EXEC
 }
