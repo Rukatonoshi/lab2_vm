@@ -5,7 +5,33 @@
 #include <string.h>
 #include <errno.h>
 #include <sys/types.h>
-#include "runtime/runtime.h"
+#include <limits.h>
+
+static inline void my_failure(const char* fmt, ...) {
+    char buffer[512];
+    int len = snprintf(buffer, sizeof(buffer), "Error: ");
+    if (len < 0 || len >= (int)sizeof(buffer)) {
+        fprintf(stderr, "Error: message too long\n");
+        exit(EXIT_FAILURE);
+    }
+
+    // Append formatted message
+    int n = vsnprintf(buffer + len, sizeof(buffer) - len, fmt, (va_list)0);
+    if (n < 0 || n >= (int)(sizeof(buffer) - len)) {
+        // Truncated
+        buffer[sizeof(buffer) - 1] = '\0';
+    }
+
+    // Add newline if missing
+    if (strlen(buffer) == 0 || buffer[strlen(buffer) - 1] != '\n') {
+        strcat(buffer, "\n");
+    }
+
+    // Output to stderr
+    fprintf(stderr, "%s", buffer);
+    exit(EXIT_FAILURE);
+}
+
 
 // The unpacked representation of bytecode file
 typedef struct {
@@ -26,22 +52,22 @@ static inline byte_file *read_file(const char *file_name) {
 
     // Check if file could be opened
     if (f == NULL) {
-        failure("failed to open file: %s\n", strerror(errno));
+        my_failure("failed to open file: %s\n", strerror(errno));
     }
 
     // Check for non negative offset
     if (fseek(f, 0, SEEK_END) < 0) {
-        failure("%s\n", strerror(errno));
+        my_failure("%s\n", strerror(errno));
     }
 
     long file_size = ftell(f);
     if (file_size == -1) {
-        failure("ftell failed: %s\n", strerror(errno));
+        my_failure("ftell failed: %s\n", strerror(errno));
     }
 
     // Additional check for file size
     if (file_size > INT_MAX - (long) sizeof(int) * 4) {
-        failure("File is too big!\nSize: %ld bytes\nMax: %ld\n",
+        my_failure("File is too big!\nSize: %ld bytes\nMax: %ld\n",
                 file_size, INT_MAX - (long) sizeof(int) * 4);
     }
 
@@ -49,7 +75,7 @@ static inline byte_file *read_file(const char *file_name) {
     rewind(f);
     int32_t header[3];
     if (fread(header, sizeof(int32_t), 3, f) != 3) {
-        failure("Failed to read header: %s\n", strerror(errno));
+        my_failure("Failed to read header: %s\n", strerror(errno));
     }
 
     int32_t string_table_size = header[0];
@@ -61,7 +87,7 @@ static inline byte_file *read_file(const char *file_name) {
         public_symbols_number < 0 ||
         global_area_size < 0)
     {
-        failure("Negative values in header:\nString table = %ld\nPublic syms = %ld\nGlobal area = %ld\n",
+        my_failure("Negative values in header:\nString table = %ld\nPublic syms = %ld\nGlobal area = %ld\n",
                 string_table_size, public_symbols_number, global_area_size);
     }
 
@@ -69,7 +95,7 @@ static inline byte_file *read_file(const char *file_name) {
     size_t public_table_size = (size_t) public_symbols_number * 2 * sizeof(u_int32_t);
     size_t data_size = public_table_size + string_table_size;
     if (file_size < (long) (3 * sizeof(u_int32_t) + data_size)) {
-        failure("File truncated: expected at least %zu bytes, got %ld\n",
+        my_failure("File truncated: expected at least %zu bytes, got %ld\n",
                 3 * sizeof(u_int32_t) + data_size, file_size);
     }
     u_int32_t code_size = file_size - (3 * sizeof(u_int32_t) + data_size);
@@ -78,7 +104,7 @@ static inline byte_file *read_file(const char *file_name) {
     byte_file *bf = (byte_file *)malloc(sizeof(byte_file) + data_size + code_size);
 
     if (bf == NULL) {
-        failure("Unable to allocate memory for byte_file\n");
+        my_failure("Unable to allocate memory for byte_file\n");
     }
 
     // Fill header fields
@@ -95,7 +121,7 @@ static inline byte_file *read_file(const char *file_name) {
     // Read the remaining data (publics + strings + code)
     if (fread(buffer, 1, data_size + code_size, f) != data_size + code_size) {
         free(bf);
-        failure("Failed to read data: %s\n", strerror(errno));
+        my_failure("Failed to read data: %s\n", strerror(errno));
     }
     fclose(f);
 
@@ -106,20 +132,20 @@ static inline byte_file *read_file(const char *file_name) {
         bf->code_ptr > buffer_end)
     {
         free(bf);
-        failure("Internal error: pointers exceed buffer bounds\n");
+        my_failure("Internal error: pointers exceed buffer bounds\n");
     }
 
     if ((char *) bf->public_ptr + public_table_size > buffer_end) {
         free(bf);
-        failure("Public symbols table exceeds file bounds (public_symbols_number=%u)", public_symbols_number);
+        my_failure("Public symbols table exceeds file bounds (public_symbols_number=%u)", public_symbols_number);
     }
     if (bf->string_ptr + bf->string_table_size > buffer_end) {
         free(bf);
-        failure("String table exceeds file bounds (string_table_size=%u)", string_table_size);
+        my_failure("String table exceeds file bounds (string_table_size=%u)", string_table_size);
     }
     if (bf->code_ptr + code_size > buffer_end) {
         free(bf);
-        failure("Code block exceeds file bounds (code_size=%u)", code_size);
+        my_failure("Code block exceeds file bounds (code_size=%u)", code_size);
     }
 
     // Store code_size in structure for future bounds checks
@@ -133,7 +159,7 @@ static inline byte_file *read_file(const char *file_name) {
 // Get string from the string table by index with bounds checking
 static inline const char* get_string(const byte_file *f, u_int32_t pos) {
     if (pos >= f->string_table_size) {
-        failure("String index out of bounds: pos=%u, string_table_size=%u\n",
+        my_failure("String index out of bounds: pos=%u, string_table_size=%u\n",
                 pos, f->string_table_size);
     }
     return f->string_ptr + pos;
@@ -144,12 +170,12 @@ static inline const char* get_string_with_ip(const byte_file *f, u_int32_t pos, 
     if (pos >= f->string_table_size) {
         if (ip && f->code_ptr) {
             long offset = ip - f->code_ptr;  // ip points to the current instruction
-            failure("String index out of bounds at offset %ld (0x%lx): "
+            my_failure("String index out of bounds at offset %ld (0x%lx): "
                     "pos=%u, string_table_size=%u\n",
                     offset, offset, pos, f->string_table_size);
         } else {
             // Fallback if IP is not available (should not happen when called from interpreter)
-            failure("String index out of bounds: pos=%u, string_table_size=%u\n",
+            my_failure("String index out of bounds: pos=%u, string_table_size=%u\n",
                     pos, f->string_table_size);
         }
     }
@@ -159,7 +185,7 @@ static inline const char* get_string_with_ip(const byte_file *f, u_int32_t pos, 
 // Get the name of a public symbol by index with bounds check
 static inline const char* get_public_name(const byte_file *f, u_int32_t idx) {
     if (idx >= f->public_symbols_number) {
-        failure("Public symbol index out of bounds: %u (public_symbols_number: %u)\n",
+        my_failure("Public symbol index out of bounds: %u (public_symbols_number: %u)\n",
                 idx, f->public_symbols_number);
     }
     return get_string(f, f->public_ptr[idx * 2]);
@@ -168,7 +194,7 @@ static inline const char* get_public_name(const byte_file *f, u_int32_t idx) {
 // Get the offset of a public symbol by index with bounds check
 static inline u_int32_t get_public_offset(const byte_file *f, u_int32_t idx) {
     if (idx >= f->public_symbols_number) {
-        failure("Public symbol index out of bounds: %u (public_symbols_number: %u)\n",
+        my_failure("Public symbol index out of bounds: %u (public_symbols_number: %u)\n",
                 idx, f->public_symbols_number);
     }
     return f->public_ptr[idx * 2 + 1];

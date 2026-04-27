@@ -1,114 +1,116 @@
+#ifndef GROUP_INFO
+#define GROUP_INFO(name, arg_size, flags)
+#endif
+
+#ifndef BINOP
+#define BINOP(opcode, name, symbol)
+#endif
+
+#ifndef LD
+#define LD(opcode, name)
+#endif
+
+#ifndef LDA
+#define LDA(opcode, name)
+#endif
+
+#ifndef ST
+#define ST(opcode, name)
+#endif
+
+#ifndef PATT
+#define PATT(opcode, name)
+#endif
+
+#ifndef ADDR_MODE
+#define ADDR_MODE(mode, name, symbol)
+#endif
+
 #ifndef INSTR
 #define INSTR(opcode, name, arg_size, flags)
 #endif
 
-#ifndef INSTR_GROUP
-#define INSTR_GROUP(opcode, name)
-#endif
+// GROUP PROPERTIES
+GROUP_INFO(BINOP, 0, 0)
+GROUP_INFO(LD, 4, 0)
+GROUP_INFO(LDA, 4, 0)
+GROUP_INFO(ST, 4, 0)
+GROUP_INFO(PATT, 0, 0)
 
-#ifndef GROUP_ELEMENT
-#define GROUP_ELEMENT(opcode, group, name, arg_size, flags)
-#endif
+// ADDRESSING MODES
+ADDR_MODE(0, GLOBAL, G)
+ADDR_MODE(1, LOCAL, L)
+ADDR_MODE(2, ARGUMENT, A)
+ADDR_MODE(3, CLOSURE, C)
 
-#ifndef END_GROUP
-#define END_GROUP
-#endif
-
-#ifndef INSTR_FLAG
-#define INSTR_FLAG(name, value)
-#endif
-
-#ifndef VARLEN_INSTR
-#define VARLEN_INSTR(code, name, flags, format_name, format_count)
-#endif
-
+// INSTRUCTION FORMAT DEFINITIONS
 #ifndef INSTR_FORMAT
 #define INSTR_FORMAT(name)
 #endif
 
-#ifndef FORMAT_FIELD
-#define FORMAT_FIELD(field_type, field_size, repeat_from)
+#ifndef FIELD_INT
+#define FIELD_INT(name, size)
+#endif
+
+#ifndef FIELD_ADDR_MODE
+#define FIELD_ADDR_MODE(name, mode)
 #endif
 
 #ifndef END_INSTR_FORMAT
-#define END_INSTR_FORMAT
+#define END_INSTR_FORMAT(name)
 #endif
 
-#ifndef ADDR_MODE
-#define ADDR_MODE(name, value)
-#endif
+// INSTRUCTION FORMATS (for variable-length instructions)
+INSTR_FORMAT(CLOSURE)
+    FIELD_INT("code_offset", 4)
+    FIELD_INT("capture_count", 4)
+    FIELD_ADDR_MODE("mode", ADDR_MODE)
+    FIELD_INT("index", 4)
+END_INSTR_FORMAT(CLOSURE)
 
-#ifndef INSTR_GROUP
-#define INSTR_GROUP(opcode, name)
-#endif
+// BINARY OPERATIONS
+BINOP(0x01, ADD, +)
+BINOP(0x02, SUB, -)
+BINOP(0x03, MUL, *)
+BINOP(0x04, DIV, /)
+BINOP(0x05, REM, %)
+BINOP(0x06, LT, <)
+BINOP(0x07, LE, <=)
+BINOP(0x08, GT, >)
+BINOP(0x09, GE, >=)
+BINOP(0x0A, EQ, ==)
+BINOP(0x0B, NE, !=)
+BINOP(0x0C, AND, &&)
+BINOP(0x0D, OR, ||)
 
-// INSTRUCTION FLAG DEFINITIONS
-INSTR_FLAG(INSTR_FLAG_JUMP, 0x01)
-INSTR_FLAG(INSTR_FLAG_HALT, 0x02)
-INSTR_FLAG(INSTR_FLAG_BREAK, 0x04)
-INSTR_FLAG(INSTR_FLAG_VARLEN, 0x08)
-INSTR_FLAG(INSTR_FLAG_RESERVED, 0x10)
+// LOAD INSTRUCTIONS
+LD(0x20, GLOBAL)
+LD(0x21, LOCAL)
+LD(0x22, ARGUMENT)
+LD(0x23, CLOSURE)
 
-// ADDRESSING MODE DEFINITIONS
-ADDR_MODE(ADDR_GLOBAL, 0x00)
-ADDR_MODE(ADDR_LOCAL, 0x01)
-ADDR_MODE(ADDR_ARGUMENT, 0x02)
-ADDR_MODE(ADDR_CLOSURE, 0x03)
+// LOAD ADDRESS INSTRUCTIONS
+LDA(0x30, GLOBAL)
+LDA(0x31, LOCAL)
+LDA(0x32, ARGUMENT)
+LDA(0x33, CLOSURE)
 
-// GROUP INSTRUCTION DEFINITIONS
-// Binary operations (BINOP)
-INSTR_GROUP(0x00, BINOP)
-    GROUP_ELEMENT(0x01, BINOP, PLUS, 0, 0)
-    GROUP_ELEMENT(0x02, BINOP, MINUS, 0, 0)
-    GROUP_ELEMENT(0x03, BINOP, MULTIPLY, 0, 0)
-    GROUP_ELEMENT(0x04, BINOP, DIVIDE, 0, 0)
-    GROUP_ELEMENT(0x05, BINOP, REMAINDER, 0, 0)
-    GROUP_ELEMENT(0x06, BINOP, LESS, 0, 0)
-    GROUP_ELEMENT(0x07, BINOP, LESS_EQUAL, 0, 0)
-    GROUP_ELEMENT(0x08, BINOP, GREATER, 0, 0)
-    GROUP_ELEMENT(0x09, BINOP, GREATER_EQUAL, 0, 0)
-    GROUP_ELEMENT(0x0A, BINOP, EQUAL, 0, 0)
-    GROUP_ELEMENT(0x0B, BINOP, NOT_EQUAL, 0, 0)
-    GROUP_ELEMENT(0x0C, BINOP, AND, 0, 0)
-    GROUP_ELEMENT(0x0D, BINOP, OR, 0, 0)
-END_GROUP
+// STORE INSTRUCTIONS
+ST(0x40, GLOBAL)
+ST(0x41, LOCAL)
+ST(0x42, ARGUMENT)
+ST(0x43, CLOSURE)
 
-// Load instructions (LD)
-INSTR_GROUP(0x20, LD)
-    GROUP_ELEMENT(0x20, LD, LD_GLOBAL, 4, 0)
-    GROUP_ELEMENT(0x21, LD, LD_LOCAL, 4, 0)
-    GROUP_ELEMENT(0x22, LD, LD_ARGUMENT, 4, 0)
-    GROUP_ELEMENT(0x23, LD, LD_CLOSURE, 4, 0)
-END_GROUP
+// PATTERN MATCHING INSTRUCTIONS
+PATT(0x60, STR)
+PATT(0x61, TAG_STR)
+PATT(0x62, TAG_ARR)
+PATT(0x63, TAG_SEXP)
+PATT(0x64, BOXED)
+PATT(0x65, UNBOXED)
+PATT(0x66, TAG_CLOSURE)
 
-// Load address instructions (LDA)
-INSTR_GROUP(0x30, LDA)
-    GROUP_ELEMENT(0x30, LDA, LDA_GLOBAL, 4, 0)
-    GROUP_ELEMENT(0x31, LDA, LDA_LOCAL, 4, 0)
-    GROUP_ELEMENT(0x32, LDA, LDA_ARGUMENT, 4, 0)
-    GROUP_ELEMENT(0x33, LDA, LDA_CLOSURE, 4, 0)
-END_GROUP
-
-// Store instructions (ST)
-INSTR_GROUP(0x40, ST)
-    GROUP_ELEMENT(0x40, ST, ST_GLOBAL, 4, 0)
-    GROUP_ELEMENT(0x41, ST, ST_LOCAL, 4, 0)
-    GROUP_ELEMENT(0x42, ST, ST_ARGUMENT, 4, 0)
-    GROUP_ELEMENT(0x43, ST, ST_CLOSURE, 4, 0)
-END_GROUP
-
-// Pattern match instructions (PATT)
-INSTR_GROUP(0x60, PATT)
-    GROUP_ELEMENT(0x60, PATT, PATT_STR, 1, 0)
-    GROUP_ELEMENT(0x61, PATT, PATT_TAG_STR, 1, 0)
-    GROUP_ELEMENT(0x62, PATT, PATT_TAG_ARR, 1, 0)
-    GROUP_ELEMENT(0x63, PATT, PATT_TAG_SEXP, 1, 0)
-    GROUP_ELEMENT(0x64, PATT, PATT_BOXED, 1, 0)
-    GROUP_ELEMENT(0x65, PATT, PATT_UNBOXED, 1, 0)
-    GROUP_ELEMENT(0x66, PATT, PATT_TAG_CLOSURE, 1, 0)
-END_GROUP
-
-// STANDALONE INSTRUCTION DEFINITIONS
+// STANDALONE INSTRUCTIONS
 // Constants & Strings (0x10 - 0x14)
 INSTR(0x10, CONST, 4, 0)
 INSTR(0x11, XSTRING, 4, 0)
@@ -117,37 +119,29 @@ INSTR(0x13, STI, 4, 0)
 INSTR(0x14, STA, 4, 0)
 
 // Jumps & Control (0x15 - 0x1B)
-INSTR(0x15, JMP, 4, 0x07)
-INSTR(0x16, END, 0, 0x06)
-INSTR(0x17, RET, 0, 0x06)
+INSTR(0x15, JMP, 4, 0x07)     // JUMP|HALT|BREAK
+INSTR(0x16, END, 0, 0x06)     // HALT|BREAK
+INSTR(0x17, RET, 0, 0x06)     // HALT|BREAK
 INSTR(0x18, DROP, 0, 0)
 INSTR(0x19, DUP, 0, 0)
 INSTR(0x1A, SWAP, 0, 0)
 INSTR(0x1B, ELEM, 0, 0)
 
 // Conditional Jumps (0x50 - 0x51)
-INSTR(0x50, CJMP_ZERO, 4, 0x05)
-INSTR(0x51, CJMP_NOT_ZERO, 4, 0x05)
+INSTR(0x50, CJMP_ZERO, 4, 0x05)  // JUMP|BREAK
+INSTR(0x51, CJMP_NOT_ZERO, 4, 0x05) // JUMP|BREAK
 
 // Procedure & Closure (0x52 - 0x56)
 INSTR(0x52, BEGIN, 8, 0)
 INSTR(0x53, CBEGIN, 8, 0)
-
-// Variable-length instruction format
-INSTR_FORMAT(closure_format)
-FORMAT_FIELD(FIELD_OP, 4, -1)
-FORMAT_FIELD(FIELD_COUNT, 4, 0)
-FORMAT_FIELD(FIELD_OP, 5, 0)
-END_INSTR_FORMAT
-
-VARLEN_INSTR(0x54, CLOSURE, 0x08, closure_format, 3)
+INSTR(0x54, CLOSURE, 8, 0x08)  // VARLEN flag - variable length instruction
 INSTR(0x55, CALLC, 4, 0)
-INSTR(0x56, CALL, 8, 0x01)
+INSTR(0x56, CALL, 8, 0x01)    // JUMP
 
 // Other Instructions (0x57 - 0x5A)
 INSTR(0x57, TAG, 8, 0)
 INSTR(0x58, ARRAY, 4, 0)
-INSTR(0x59, FAIL, 8, 0x06)
+INSTR(0x59, FAIL, 8, 0x06)    // HALT|BREAK
 INSTR(0x5A, LINE, 4, 0)
 
 // Built-in Calls (0x70 - 0x74)
@@ -157,14 +151,16 @@ INSTR(0x72, CALL_LENGTH, 0, 0)
 INSTR(0x73, CALL_STRING, 0, 0)
 INSTR(0x74, CALL_ARRAY, 4, 0)
 
-// CLEANUP
-#undef INSTR
-#undef INSTR_GROUP
-#undef GROUP_ELEMENT
-#undef END_GROUP
-#undef INSTR_FLAG
-#undef ADDR_MODE
-#undef VARLEN_INSTR
-#undef INSTR_FORMAT
-#undef FORMAT_FIELD
-#undef END_INSTR_FORMAT
+// NOTE: Caller is responsible for #undef-ing used macros
+// #undef GROUP_INFO
+// #undef BINOP
+// #undef LD
+// #undef LDA
+// #undef ST
+// #undef PATT
+// #undef ADDR_MODE
+// #undef INSTR
+// #undef INSTR_FORMAT
+// #undef FIELD_INT
+// #undef FIELD_ADDR_MODE
+// #undef END_INSTR_FORMAT

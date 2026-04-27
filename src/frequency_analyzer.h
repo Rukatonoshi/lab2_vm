@@ -1,7 +1,12 @@
 #ifndef FREQUENCY_ANALYZER_H
 #define FREQUENCY_ANALYZER_H
 
+#include "../include/instructions.h"
 #include "byte_file.h"
+
+// Debug mode - set to 1 to enable detailed debug output
+#define DEBUG_ANALYSIS 1
+#define DEBUG_DECODE 0
 
 // Limitation for number of unique sequences
 #define MAX_UNIQUE_SEQUENCES 100000

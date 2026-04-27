@@ -140,6 +140,7 @@ static inline void reverse_on_stack(int count) {
     }
 }
 
+// Get address based on new non-redundant addressing structure
 static uint32_t *get_by_loc(u_int8_t bytecode, uint32_t index) {
     // Validate this is an addressing instruction (LD, LDA, ST groups)
     uint8_t high = high_bits(bytecode);
@@ -170,8 +171,8 @@ void exec_binop(u_int8_t bytecode) {
     int a_is_int = UNBOXED(a_val);
     int b_is_int = UNBOXED(b_val);
 
-    // For EQUAL, one of the operands must be an integer. Integers are never equal to values of other types.
-    if (op == EQUAL) {
+    // For EQ operation, one of the operands must be an integer. Integers are never equal to values of other types.
+    if (op == BINOP_EQ) {
         if (a_is_int && b_is_int) {
             int a = UNBOX(a_val);
             int b = UNBOX(b_val);
@@ -179,10 +180,9 @@ void exec_binop(u_int8_t bytecode) {
         } else if (a_is_int || b_is_int) {
             vstack_push(BOX(0));
         } else {
-            runtime_error("BINOP EQUAL called with two non-integer arguments: %s and %s",
+            runtime_error("BINOP EQ called with two non-integer arguments: %s and %s",
                           type_name(a_val), type_name(b_val));
         }
-
         return;
     }
 
@@ -195,28 +195,51 @@ void exec_binop(u_int8_t bytecode) {
     int b = UNBOX(b_val);
     int result;
 
+    // Map opcodes to operations using BINOP_* constants
     switch (op) {
-        case PLUS:          result = a + b; break;
-        case MINUS:         result = a - b; break;
-        case MULTIPLY:      result = a * b; break;
-        case DIVIDE:
+        case BINOP_ADD:         // (+)
+            result = a + b;
+            break;
+        case BINOP_SUB:         // (-)
+            result = a - b;
+            break;
+        case BINOP_MUL:         // (*)
+            result = a * b;
+            break;
+        case BINOP_DIV:         // (/)
             if (b == 0) runtime_error("Division by zero: a=%d, b=0", a);
             result = a / b;
             break;
-        case REMAINDER:
+        case BINOP_REM:         // (%)
             if (b == 0) runtime_error("Remainder by zero: a=%d, b=0", a);
             result = a % b;
             break;
-        case LESS:          result = a < b; break;
-        case LESS_EQUAL:    result = a <= b; break;
-        case GREATER:       result = a > b; break;
-        case GREATER_EQUAL: result = a >= b; break;
-        case EQUAL:         result = a == b; break;
-        case NOT_EQUAL:     result = a != b; break;
-        case AND:           result = a && b; break;
-        case OR:            result = a || b; break;
+        case BINOP_LT:          // (<)
+            result = a < b;
+            break;
+        case BINOP_LE:          // (<=)
+            result = a <= b;
+            break;
+        case BINOP_GT:          // (>)
+            result = a > b;
+            break;
+        case BINOP_GE:          // (>=)
+            result = a >= b;
+            break;
+        case BINOP_EQ:          // (==)
+            result = a == b;
+            break;
+        case BINOP_NE:          // (!=)
+            result = a != b;
+            break;
+        case BINOP_AND:         // (&&)
+            result = a && b;
+            break;
+        case BINOP_OR:          // (||)
+            result = a || b;
+            break;
         default:
-            runtime_error("Unknown binop bytecode: %d", low_bits(bytecode));
+            runtime_error("Unknown binop bytecode: %d", op);
     }
 
     vstack_push(BOX(result));
@@ -244,39 +267,33 @@ void exec_st(u_int8_t bytecode) {
 void exec_patt(u_int8_t bytecode) {
     u_int32_t *element = (u_int32_t *) vstack_pop();
     u_int32_t result = -1;
+
     switch (bytecode) {
-        case PATT_STR: {
+        case PATT_STR:
             result = Bstring_patt(element, (u_int32_t *) vstack_pop());
             break;
-        }
-        case PATT_TAG_STR: {
+        case PATT_TAG_STR:
             result = Bstring_tag_patt(element);
             break;
-        }
-        case PATT_TAG_ARR: {
+        case PATT_TAG_ARR:
             result = Barray_tag_patt(element);
             break;
-        }
-        case PATT_TAG_SEXP: {
+        case PATT_TAG_SEXP:
             result = Bsexp_tag_patt(element);
             break;
-        }
-        case PATT_BOXED: {
+        case PATT_BOXED:
             result = Bboxed_patt(element);
             break;
-        }
-        case PATT_UNBOXED: {
+        case PATT_UNBOXED:
             result = Bunboxed_patt(element);
             break;
-        }
-        case PATT_TAG_CLOSURE: {
+        case PATT_TAG_CLOSURE:
             result = Bclosure_tag_patt(element);
             break;
-        }
-        default: {
-            runtime_error("ERROR: Unknown pattern type for PATT 0x*%d.\n", low_bits(bytecode));
-        }
+        default:
+            runtime_error("ERROR: Unknown pattern type for PATT 0x%02x.\n", bytecode);
     }
+
     vstack_push(result);
 }
 
@@ -418,7 +435,7 @@ void exec_closure() {
     }
 
     for (u_int32_t i = 0; i < bn; ++i) {
-        // The byte is already the addressing mode (0x00-0x03 for G/L/A/C)
+        // The byte addressing mode (0x00-0x03 for G/L/A/C)
         u_int8_t mode_byte = (u_int8_t) get_next_byte();
         u_int32_t value = (u_int32_t) get_next_int();
         // Directly use the addressing mode to resolve address

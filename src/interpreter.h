@@ -2,6 +2,7 @@
 
 #include "../include/instructions.h"
 #include "byte_file.h"
+#include "runtime/runtime.h"
 #include <stdbool.h>
 #include <sys/types.h>
 

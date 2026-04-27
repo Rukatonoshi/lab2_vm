@@ -6,7 +6,7 @@
 #include <stdarg.h>
 
 #include "byte_file.h"
-#include "bytecode_decoder.h"
+#include "../include/instructions.h"
 #include "frequency_analyzer.h"
 
 // Error handling
@@ -21,16 +21,16 @@ static void fatal_error(const char *fmt, ...) {
 
 // Instruction decoding and printing
 typedef struct {
-    bytecode_type opcode;      // main opcode type (CONST, BINOP, ...)
-    u_int8_t subtype;          // for groups: operation or location type
-    u_int32_t *params;         // parameters (enough for CLOSURE)
-    size_t param_count;        // number of parameters stored
-    size_t param_capacity;     // current params memory usage
-    size_t length;             // total length in bytes
+    uint8_t opcode;
+    uint8_t subtype;
+    u_int32_t *params;
+    size_t param_count;
+    size_t param_capacity;
+    size_t length;
 } InstrInfo;
 
 static bool init_instr_info(InstrInfo *info, size_t initial_capacity) {
-    info->params = (u_int32_t*)calloc(initial_capacity, sizeof(u_int32_t));
+    info->params = calloc(initial_capacity, sizeof(u_int32_t));
     if (!info->params) return false;
     info->param_count = 0;
     info->param_capacity = initial_capacity;
@@ -39,18 +39,20 @@ static bool init_instr_info(InstrInfo *info, size_t initial_capacity) {
 }
 
 static void free_instr_info(InstrInfo *info) {
-    free(info->params);
-    info->params = NULL;
-    info->param_count = 0;
-    info->param_capacity = 0;
-    info->length = 0;
+    if (info && info->params) {
+        free(info->params);
+        info->params = NULL;
+        info->param_count = 0;
+        info->param_capacity = 0;
+        info->length = 0;
+    }
 }
 
 static bool ensure_capacity(InstrInfo *info, size_t needed) {
     if (info->param_capacity >= needed) return true;
-    size_t new_capacity = info->param_capacity * 2;
-    while (new_capacity < needed) new_capacity *= 2;
-    u_int32_t *new_params = (u_int32_t*)realloc(info->params, new_capacity * sizeof(u_int32_t));
+    // Calculate geometrically growing capacity
+    size_t new_capacity = (needed > info->param_capacity * 2) ? needed : info->param_capacity * 2;
+    u_int32_t *new_params = realloc(info->params, new_capacity * sizeof(u_int32_t));
     if (!new_params) return false;
     info->params = new_params;
     info->param_capacity = new_capacity;
@@ -65,109 +67,157 @@ static bool decode_instruction(const u_int8_t *code, size_t max_len, u_int32_t a
     u_int8_t l = low_bits(first);
     size_t pos = 1;
 
-    bytecode_type type;
-    if (h == BINOP_HIGH_BITS) {
-        type = BINOP;
-        info->subtype = l;
-    } else if (h == LD_HIGH_BITS) {
-        type = LD;
-        info->subtype = l;
-    } else if (h == LDA_HIGH_BITS) {
-        type = LDA;
-        info->subtype = l;
-    } else if (h == ST_HIGH_BITS) {
-        type = ST;
-        info->subtype = l;
-    } else if (h == PATT_HIGH_BITS) {
-        type = PATT;
-        info->subtype = l;
-    } else {
-        type = (bytecode_type)first;
-        info->subtype = 0;
-        if (first == BEGIN + 1) {
-            type = BEGIN;
-        }
+    // Get instruction info from X-macro table
+    instruction_info_t *instr = get_instruction_info(first);
+    if (!instr) {
+        return false;
     }
 
-    info->opcode = type;
+    // Set opcode and subtype based on group membership
+    info->opcode = first;
     info->param_count = 0;
 
-    // Dynamic allocation
-    if (!init_instr_info(info, 8)) return false; // base capacity 8
+    if (instr->is_group) {
+        // Extract subtype from low bits for group instructions
+        info->subtype = l;
+    } else {
+        // Standalone instruction, no meaningful subtype
+        info->subtype = 0;
+    }
 
-    // Стандартные операции
-    switch (type) {
-        case BINOP:
-        case PATT:
-        case DROP: case DUP: case SWAP: case ELEM:
-        case END: case RET:
-        case CALL_READ: case CALL_WRITE: case CALL_LENGTH: case CALL_STRING:
-        case STA: case STI:
-            break;
+    // Allocate appropriate initial capacity based on instruction type
+    size_t initial_capacity = 8; // Default for non-VARLEN instructions
+    if (instr->flags & INSTR_FLAG_VARLEN) {
+        const instruction_format_t* fmt = get_instruction_format(instr->instr_name);
+        if (fmt) {
+            // Count non-repeating fields before count field
+            int non_repeating = 0;
+            for (int i = 0; i < fmt->field_count; i++) {
+                if (strstr(fmt->fields[i].name, "count") != NULL) {
+                    break;
+                }
+                non_repeating++;
+            }
+            // Calculate sensible initial capacity (estimate for 2-4 repeating iterations)
+            int repeating_fields = fmt->field_count - non_repeating;
+            size_t estimated = non_repeating + repeating_fields * 4;
+            initial_capacity = (estimated < 8) ? 8 : (estimated < 16) ? 16 : (estimated < 32) ? 32 : 64;
+        } else {
+            // Fallback for formats without proper structure
+            initial_capacity = 16;
+        }
+    }
+    if (!init_instr_info(info, initial_capacity)) return false;
 
-        case CALL_ARRAY:
-            READ_INT();
-            break;
+    // Universal parameter reading using format table
+    const instruction_format_t* format = NULL;
+    if (instr->flags & INSTR_FLAG_VARLEN) {
+        format = get_instruction_format(instr->instr_name);
+        if (!format) return false;
+    }
 
-        case CONST:
-        case XSTRING:
-        case JMP:
-        case CJMP_Z:
-        case CJMP_NZ:
-        case LINE:
-            READ_INT();
-            break;
+    int arg_size = instr->arg_size;
 
-        case LD: case LDA: case ST:
-            READ_INT();
-            break;
+    // Handle VARLEN instructions using format table
+    if (format) {
+        u_int32_t repeat_count = 0;
+        int repeat_start_field = -1;
 
-        case SEXP:
-            READ_INT(); // string index
-            READ_INT(); // arity
-            break;
+        // First pass: process non-repeating fields and find count field
+        for (int i = 0; i < format->field_count; i++) {
+            const field_descriptor_t* field = &format->fields[i];
 
-        case BEGIN:
-        case CBEGIN:
-            READ_INT(); // n_args
-            READ_INT(); // n_locals
-            break;
+            if (field->type == FIELD_TYPE_INT) {
+                // Determine if we should process this field
+                bool is_count_field = (strstr(field->name, "count") != NULL);
+                bool will_process = is_count_field || repeat_start_field == -1;
 
-        case CALL:
-            READ_INT(); // target offset
-            READ_INT(); // n_args
-            break;
+                if (will_process) {
+                    if (pos + field->size > max_len) return false;
 
-        case TAG:
-            READ_INT(); // string index
-            READ_INT(); // n
-            break;
+                    u_int32_t val = 0;
+                    for (int j = 0; j < field->size; j++) {
+                        val |= (u_int32_t)code[pos + j] << (j * 8);
+                    }
 
-        case FAIL:
-            READ_INT(); // line
-            READ_INT(); // column
-            break;
+                    if (is_count_field) {
+                        repeat_count = val;
+                        repeat_start_field = i + 1;
+                    }
 
-        case ARRAY:
-        case CALLC:
-            READ_INT();
-            break;
+                    if (!ensure_capacity(info, info->param_count + 1)) return false;
+                    info->params[info->param_count++] = val;
+                    pos += field->size;
+                }
+                // Skip repeating INT fields (they're processed in second pass)
+            }
+            // Skip repeating ADDR_MODE fields in first pass
+        }
 
-        case CLOSURE:
-            READ_INT(); // ip
-            READ_INT(); // bn
-            {
-                u_int32_t bn = info->params[info->param_count - 1];
-                for (u_int32_t i = 0; i < bn; i++) {
-                    READ_BYTE(); // location type
-                    READ_INT();  // index
+        // Second pass: process repeating fields only if count > 0
+        if (repeat_count > 0 && repeat_start_field != -1) {
+            int num_repeating_fields = format->field_count - repeat_start_field;
+
+            for (u_int32_t r = 0; r < repeat_count; r++) {
+                for (int bf = 0; bf < num_repeating_fields; bf++) {
+                    const field_descriptor_t* repeating_field = &format->fields[repeat_start_field + bf];
+
+                    if (repeating_field->type == FIELD_TYPE_INT) {
+                        if (pos + repeating_field->size > max_len) return false;
+
+                        u_int32_t val = 0;
+                        for (int j = 0; j < repeating_field->size; j++) {
+                            val |= (u_int32_t)code[pos + j] << (j * 8);
+                        }
+                        if (!ensure_capacity(info, info->param_count + 1)) return false;
+                        info->params[info->param_count++] = val;
+                        pos += repeating_field->size;
+                    } else if (repeating_field->type == FIELD_TYPE_ADDR_MODE) {
+                        if (pos + repeating_field->size > max_len) return false;
+                        u_int8_t mode = code[pos];
+                        if (!ensure_capacity(info, info->param_count + 1)) return false;
+                        info->params[info->param_count++] = mode;
+                        pos += repeating_field->size;
+                    }
                 }
             }
-            break;
+        }
+    } else if (arg_size > 0) {
+        // Fixed-size arguments: read arg_size bytes
+        // Store as u_int32_t chunks (4 bytes each)
+        size_t remaining = arg_size;
+        while (remaining > 0) {
+            if (pos + remaining > max_len) return false;
 
-        default:
-            free_instr_info(info);
-            return false;
+            if (remaining >= sizeof(u_int32_t)) {
+                // Read 4-byte chunk
+                u_int32_t val = (u_int32_t)code[pos] |
+                              ((u_int32_t)code[pos+1] << 8) |
+                              ((u_int32_t)code[pos+2] << 16) |
+                              ((u_int32_t)code[pos+3] << 24);
+                if (!ensure_capacity(info, info->param_count + 1)) return false;
+                info->params[info->param_count++] = val;
+                pos += sizeof(u_int32_t);
+                remaining -= sizeof(u_int32_t);
+            } else if (remaining == 1) {
+                // Read 1-byte value
+                u_int8_t val = code[pos];
+                if (!ensure_capacity(info, info->param_count + 1)) return false;
+                info->params[info->param_count++] = val;
+                pos += remaining;
+                remaining = 0;
+            } else {
+                // Other byte sizes: pack into 4-byte chunks
+                u_int32_t val = 0;
+                for (int i = 0; i < remaining; i++) {
+                    val |= (u_int32_t)code[pos + i] << (i * 8);
+                }
+                if (!ensure_capacity(info, info->param_count + 1)) return false;
+                info->params[info->param_count++] = val;
+                pos += remaining;
+                remaining = 0;
+            }
+        }
     }
 
     info->length = pos;
@@ -175,123 +225,88 @@ static bool decode_instruction(const u_int8_t *code, size_t max_len, u_int32_t a
 }
 
 static void print_instr(const InstrInfo *info, FILE *out) {
-    switch (info->opcode) {
-        case BINOP: {
-            const char *op = NULL;
-            switch (info->subtype) {
-                case PLUS: op = "+"; break;
-                case MINUS: op = "-"; break;
-                case MULTIPLY: op = "*"; break;
-                case DIVIDE: op = "/"; break;
-                case REMAINDER: op = "%"; break;
-                case LESS: op = "<"; break;
-                case LESS_EQUAL: op = "<="; break;
-                case GREATER: op = ">"; break;
-                case GREATER_EQUAL: op = ">="; break;
-                case EQUAL: op = "=="; break;
-                case NOT_EQUAL: op = "!="; break;
-                case AND: op = "&&"; break;
-                case OR: op = "||"; break;
-                default: break;
-            }
-            if (op)
-                fprintf(out, "BINOP %s", op);
-            else
-                fprintf(out, "BINOP ??? (subtype=%u)", info->subtype);
-            break;
+    instruction_info_t *instr = get_instruction_info(info->opcode);
+    if (!instr) {
+        fatal_error("Failed to get information about instruction with opcode 0x%02x", info->opcode);
+        return;
+    }
+
+    const char *name = instr->instr_name;
+    if (strcmp(name, "UNKNOWN") == 0) {
+        fatal_error("Failed to get instruction name with opcode 0x%02x", info->opcode);
+        return;
+    }
+
+    // Print instruction name
+    fprintf(out, "%s", name);
+
+    // Print parameters universally
+    if (info->param_count > 0) {
+        const instruction_format_t* format = NULL;
+        if (instr->flags & INSTR_FLAG_VARLEN) {
+            format = get_instruction_format(instr->instr_name);
         }
-        case CONST:    fprintf(out, "CONST %d", (int32_t)info->params[0]); break;
-        case XSTRING:  fprintf(out, "STRING %u", info->params[0]); break;
-        case SEXP:     fprintf(out, "SEXP %u %u", info->params[0], info->params[1]); break;
-        case STA:      fprintf(out, "STA"); break;
-        case STI:      fprintf(out, "STI"); break;
-        case JMP:      fprintf(out, "JMP 0x%02x", info->params[0]); break;
-        case END:      fprintf(out, "END"); break;
-        case RET:      fprintf(out, "RET"); break;
-        case DROP:     fprintf(out, "DROP"); break;
-        case DUP:      fprintf(out, "DUP"); break;
-        case SWAP:     fprintf(out, "SWAP"); break;
-        case ELEM:     fprintf(out, "ELEM"); break;
-        case LD: {
-            const char *loc = "?";
-            switch (info->subtype) {
-                case L_GLOBAL: loc = "Global"; break;
-                case L_LOCAL:  loc = "Local"; break;
-                case L_ARGUMENT: loc = "Arg"; break;
-                case L_CLOSURE: loc = "Closure"; break;
-            }
-            fprintf(out, "LD %s %u", loc, info->params[0]);
-            break;
-        }
-        case LDA: {
-            const char *loc = "?";
-            switch (info->subtype) {
-                case L_GLOBAL: loc = "Global"; break;
-                case L_LOCAL:  loc = "Local"; break;
-                case L_ARGUMENT: loc = "Arg"; break;
-                case L_CLOSURE: loc = "Closure"; break;
-            }
-            fprintf(out, "LDA %s %u", loc, info->params[0]);
-            break;
-        }
-        case ST: {
-            const char *loc = "?";
-            switch (info->subtype) {
-                case L_GLOBAL: loc = "Global"; break;
-                case L_LOCAL:  loc = "Local"; break;
-                case L_ARGUMENT: loc = "Arg"; break;
-                case L_CLOSURE: loc = "Closure"; break;
-            }
-            fprintf(out, "ST %s %u", loc, info->params[0]);
-            break;
-        }
-        case CJMP_Z:   fprintf(out, "CJMPz 0x%02x", info->params[0]); break;
-        case CJMP_NZ:  fprintf(out, "CJMPnz 0x%02x", info->params[0]); break;
-        case BEGIN:    fprintf(out, "BEGIN %u %u", info->params[0], info->params[1]); break;
-        case CBEGIN:   fprintf(out, "CBEGIN %u %u", info->params[0], info->params[1]); break;
-        case CLOSURE: {
-            fprintf(out, "CLOSURE %u %u", info->params[0], info->params[1]);
-            u_int32_t bn = info->params[1];
-            for (u_int32_t i = 0; i < bn; i++) {
-                u_int8_t b = info->params[2 + i*2];
-                u_int32_t idx = info->params[2 + i*2 + 1];
-                const char *loc = "?";
-                switch (b) {
-                    case L_GLOBAL: loc = "Global"; break;
-                    case L_LOCAL:  loc = "Local"; break;
-                    case L_ARGUMENT: loc = "Arg"; break;
-                    case L_CLOSURE: loc = "Closure"; break;
+
+        // Format-based printing for VARLEN instructions
+        if (format) {
+            u_int32_t repeat_count = 0;
+            int repeat_start_field = -1;
+            int param_index = 0;
+            uint8_t mode;
+            const char* mode_str;
+
+            // First pass: process non-repeating fields and extract count
+            for (int i = 0; i < format->field_count && param_index < info->param_count; i++) {
+                const field_descriptor_t* field = &format->fields[i];
+
+                if (field->type == FIELD_TYPE_INT) {
+                    // Check if this is the count field
+                    if (strstr(field->name, "count") != NULL) {
+                        repeat_count = info->params[param_index];
+                        repeat_start_field = i + 1;
+                        fprintf(out, " %u", info->params[param_index++]);
+                    } else if (repeat_start_field == -1) {
+                        // Before count field: process normally
+                        fprintf(out, " %u", info->params[param_index++]);
+                    }
+                    // After count field: skip (processed in second pass)
                 }
-                fprintf(out, " %s %u", loc, idx);
+                // Skip ADDR_MODE fields in first pass
             }
-            break;
-        }
-        case CALLC:    fprintf(out, "CALLC %u", info->params[0]); break;
-        case CALL:     fprintf(out, "CALL 0x%02x %u", info->params[0], info->params[1]); break;
-        case TAG:      fprintf(out, "TAG %u %u", info->params[0], info->params[1]); break;
-        case ARRAY:    fprintf(out, "ARRAY %u", info->params[0]); break;
-        case FAIL:     fprintf(out, "FAIL %u %u", info->params[0], info->params[1]); break;
-        case LINE:     fprintf(out, "LINE %u", info->params[0]); break;
-        case PATT: {
-            const char *patt = "???";
-            switch (info->subtype) {
-                case PATT_STR:        patt = "=str"; break;
-                case PATT_TAG_STR:    patt = "#string"; break;
-                case PATT_TAG_ARR:    patt = "#array"; break;
-                case PATT_TAG_SEXP:   patt = "#sexp"; break;
-                case PATT_BOXED:      patt = "#ref"; break;
-                case PATT_UNBOXED:    patt = "#val"; break;
-                case PATT_TAG_CLOSURE: patt = "#fun"; break;
+
+            // Second pass: process repeating fields only if count > 0
+            if (repeat_count > 0 && repeat_start_field != -1) {
+                int num_repeating_fields = format->field_count - repeat_start_field;
+
+                for (u_int32_t r = 0; r < repeat_count && param_index < info->param_count; r++) {
+                    for (int bf = 0; bf < num_repeating_fields && param_index < info->param_count; bf++) {
+                        const field_descriptor_t* repeating_field = &format->fields[repeat_start_field + bf];
+
+                        if (repeating_field->type == FIELD_TYPE_INT) {
+                            fprintf(out, " %u", info->params[param_index++]);
+                        } else if (repeating_field->type == FIELD_TYPE_ADDR_MODE) {
+                            mode = (uint8_t)info->params[param_index++];
+                            mode_str = "U";
+                            if (mode < ADDR_MODE_MAX) {
+                                mode_str = addr_mode_symbols[mode];
+                            }
+                            // Print mode(index) format for varspec fields
+                            if (param_index < info->param_count) {
+                                uint32_t index = info->params[param_index++];
+                                fprintf(out, " %s(%u)", mode_str, index);
+                            }
+                        }
+                    }
+                }
             }
-            fprintf(out, "PATT %s", patt);
-            break;
+        } else {
+            // Standard parameter printing for non-VARLEN instructions
+            fprintf(out, " ");
+            for (size_t i = 0; i < info->param_count; i++) {
+                if (i > 0) fprintf(out, " ");
+                fprintf(out, "%u", info->params[i]);
+            }
         }
-        case CALL_READ:    fprintf(out, "CALL Lread"); break;
-        case CALL_WRITE:   fprintf(out, "CALL Lwrite"); break;
-        case CALL_LENGTH:  fprintf(out, "CALL Llength"); break;
-        case CALL_STRING:  fprintf(out, "CALL Lstring"); break;
-        case CALL_ARRAY:   fprintf(out, "CALL Barray %u", info->params[0]); break;
-        default:           fprintf(out, "UNKNOWN(%02x)", info->opcode); break;
     }
 }
 
@@ -300,8 +315,8 @@ static void print_sequence(FILE *out, const u_int8_t *data, size_t len) {
     int first = 1;
     while (pos < len) {
         InstrInfo info;
-        if (!decode_instruction(data + pos, len - pos, pos,&info)) {
-            fprintf(out, "<invalid>");
+        if (!decode_instruction(data + pos, len - pos, pos, &info)) {
+            fatal_error("Failed to decode instruction at offset 0x%02x", pos);
             return;
         }
         if (!first) fprintf(out, ", ");
@@ -315,7 +330,7 @@ static void print_sequence(FILE *out, const u_int8_t *data, size_t len) {
 #include "uthash.h"
 
 typedef struct {
-    const u_int8_t *bytes;            // copy of the byte sequence
+    const u_int8_t *bytes;     // pointer to original bytecode
     size_t len;
     u_int32_t count;
     UT_hash_handle hh;
@@ -327,8 +342,9 @@ static void increment_count(const u_int8_t *data, size_t len) {
     CountEntry *entry;
     HASH_FIND(hh, counts, data, len, entry);
     if (!entry) {
-        if (HASH_COUNT(counts) >= MAX_UNIQUE_SEQUENCES) return; // limitation on number of unique sequences
-        entry = (CountEntry*)malloc(sizeof(CountEntry));
+        if (HASH_COUNT(counts) >= MAX_UNIQUE_SEQUENCES) return;
+        entry = malloc(sizeof(CountEntry));
+        if (!entry) return;
         entry->bytes = data;
         entry->len = len;
         entry->count = 0;
@@ -337,17 +353,27 @@ static void increment_count(const u_int8_t *data, size_t len) {
     entry->count++;
 }
 
-// Reachability analysis
-static bool is_control_transfer(bytecode_type op) {
-    return op == JMP || op == CJMP_Z || op == CJMP_NZ || op == CALL;
+// Reachability analysis - universal using instruction flags
+static bool is_control_transfer(uint8_t op) {
+    instruction_info_t *instr = get_instruction_info(op);
+    return instr && (instr->flags & INSTR_FLAG_JUMP);
 }
 
-static bool is_terminal(bytecode_type op) {
-    return op == JMP || op == END || op == RET || op == FAIL;
+static bool is_terminal(uint8_t op) {
+    instruction_info_t *instr = get_instruction_info(op);
+    return instr && (instr->flags & INSTR_FLAG_HALT);
 }
 
-static bool split_after(bytecode_type op) {
-    return op == JMP || op == CALL || op == CALLC || op == RET || op == END || op == FAIL;
+static bool split_after(uint8_t op) {
+    instruction_info_t *instr = get_instruction_info(op);
+    if (!instr) return false;
+
+    // Split after jumps, calls, and terminal instructions
+    if (instr->flags & INSTR_FLAG_JUMP) return true;
+    if (instr->flags & INSTR_FLAG_HALT) return true;
+    if (instr->flags & INSTR_FLAG_BREAK) return true;
+
+    return false;
 }
 
 // Comparison function for sorting entries (file scope, static)
@@ -365,64 +391,126 @@ static int compare_entries(const void *a, const void *b) {
     return 0;
 }
 
+static void print_function_calls(byte_file *bf) {
+    printf("\n--- Public Functions ---\n");
+
+    // Calculate file offset base
+    uint32_t public_table_size = bf->public_symbols_number * 2 * sizeof(u_int32_t);
+    uint32_t file_offset_base = 12 + public_table_size + (uint32_t)bf->string_table_size;
+
+    for (u_int32_t i = 0; i < bf->public_symbols_number; i++) {
+        const char* name = get_public_name(bf, i);
+        u_int32_t code_offset = get_public_offset(bf, i);
+        u_int32_t file_offset = file_offset_base + code_offset;
+        printf("Function %u: %s at file offset 0x%08x (code offset 0x%08x)\n", i, name, file_offset, code_offset);
+    }
+}
+
+static void print_reachability_stats(byte_file *bf, u_int8_t *reachable) {
+    u_int32_t reachable_count = 0;
+    for (u_int32_t i = 0; i < bf->code_size; i++) {
+        if (reachable[i]) {
+            reachable_count++;
+        }
+    }
+    printf("\n--- Reachability Stats ---\n");
+    printf("Total code size: %u bytes\n", bf->code_size);
+    printf("Reachable instructions: %u bytes\n", reachable_count);
+    if (bf->code_size > 0) {
+        printf("Reachable code: %.2f%%\n", (double)reachable_count / bf->code_size * 100);
+    }
+}
+
 // Main analysis function
 void analyze_frequency(byte_file *bf) {
-    // Array of reachable flags (1 byte per code byte)
+    // Array of reachable flags and split points (1 byte per code byte)
     u_int8_t *reachable = (u_int8_t*)calloc(bf->code_size, 1);
-    u_int8_t *jump_target = (u_int8_t*)calloc(bf->code_size, 1);
-    if (!reachable || !jump_target) fatal_error("Out of memory");
+    u_int8_t *seq_split = (u_int8_t*)calloc(bf->code_size, 1);
+    if (!reachable || !seq_split) fatal_error("Out of memory");
 
-    // Queue for addresses to process
-    u_int32_t *queue = (u_int32_t*)malloc(bf->code_size * sizeof(u_int32_t));
-    if (!queue) fatal_error("Out of memory");
-    u_int32_t qhead = 0, qtail = 0;
+    // Mark all public symbols as entry points (split points)
+#if DEBUG_ANALYSIS
+    printf("DEBUG: Found %u public symbols\n", bf->public_symbols_number);
+#endif
 
-    // Enqueue all public symbols
     for (u_int32_t i = 0; i < bf->public_symbols_number; i++) {
         u_int32_t addr = get_public_offset(bf, i);
+#if DEBUG_ANALYSIS
+        printf("DEBUG: Public symbol %s at offset 0x%08x\n", get_public_name(bf, i), addr);
+#endif
         if (addr >= bf->code_size) {
             fatal_error("Public symbol offset %u out of code bounds", addr);
         }
         if (!reachable[addr]) {
             reachable[addr] = 1;
-            queue[qtail++] = addr;
+            seq_split[addr] = 1; // Public symbols are sequence start points
         }
     }
 
-    // Forward reachability
-    while (qhead < qtail) {
-        u_int32_t addr = queue[qhead++];
+    // Forward pass: Mark reachable code and sequence split points
+    uint32_t addr = 0;
+    while (addr < bf->code_size) {
+        if (!reachable[addr]) {
+            addr++; // Skip unreachable bytes
+            continue;
+        }
+
         InstrInfo info;
         if (!decode_instruction((u_int8_t*)bf->code_ptr + addr, bf->code_size - addr, addr, &info)) {
             fatal_error("Failed to decode instruction at offset 0x%02x", addr);
         }
 
-        // If it's a jump, add target
+#if DEBUG_ANALYSIS
+        instruction_info_t *instr = get_instruction_info(info.opcode);
+        printf("DEBUG: Visiting addr=0x%08x, bytes_len=%zu, name=%s\n",
+               addr, info.length, instr->instr_name);
+#endif
+
+        // Mark jump targets as split points
         if (is_control_transfer(info.opcode)) {
-            u_int32_t target = info.params[0]; // first param is target offset
+            u_int32_t target = info.params[0];
             if (target >= bf->code_size) {
                 fatal_error("Jump target %u out of code bounds at offset %u", target, addr);
             }
-            jump_target[target] = 1;
             if (!reachable[target]) {
-                reachable[target] = 1;
-                queue[qtail++] = target;
+                reachable[target] = 1; // New entry point
+                seq_split[target] = 1;  // Mark as sequence start
+            } else {
+                seq_split[target] = 1;  // Mark as sequence start (even if already reachable)
             }
         }
 
-        // If not terminal, add next instruction
+        // Mark next instruction if not terminal
         if (!is_terminal(info.opcode)) {
-            u_int32_t next = addr + info.length;
-            if (next < bf->code_size && !reachable[next]) {
+            uint32_t next = addr + info.length;
+            if (next < bf->code_size) {
                 reachable[next] = 1;
-                queue[qtail++] = next;
             }
         }
+
+        // Mark split points after calls and split_after instructions
+        if (split_after(info.opcode)) {
+            uint32_t next = addr + info.length;
+            if (next < bf->code_size) {
+                seq_split[next] = 1;
+            }
+        }
+
+        addr += info.length;
     }
 
-    free(queue);
+#if DEBUG_ANALYSIS
+    if (DEBUG_ANALYSIS) {
+        uint32_t reachable_bytes = 0, split_count = 0;
+        for (uint32_t i = 0; i < bf->code_size; i++) {
+            if (reachable[i]) reachable_bytes++;
+            if (seq_split[i]) split_count++;
+        }
+        printf("DEBUG: Reachable bytes: %u, Split points: %u\n", reachable_bytes, split_count);
+    }
+#endif
 
-    // Walk through code, building basic blocks and counting sequences
+    // Walk through code, building sequences using split points
     u_int32_t i = 0;
     while (i < bf->code_size) {
         // Skip unreachable areas
@@ -431,8 +519,7 @@ void analyze_frequency(byte_file *bf) {
             continue;
         }
 
-        // Start of a block
-        u_int32_t block_start = i;
+        // Start of a sequence
         const u_int8_t *prev_start = NULL;
         size_t prev_len = 0;
 
@@ -441,6 +528,11 @@ void analyze_frequency(byte_file *bf) {
             if (!decode_instruction((u_int8_t*)bf->code_ptr + i, bf->code_size - i, i, &cur)) {
                 fatal_error("Failed to decode instruction at offset %u", i);
             }
+
+#if DEBUG_ANALYSIS
+            instruction_info_t *instr = get_instruction_info(cur.opcode);
+            printf("DEBUG: Sequence: %s (len=%zu) at 0x%08x\n", instr->instr_name, cur.length, i);
+#endif
 
             // Count single instruction
             increment_count((u_int8_t*)bf->code_ptr + i, cur.length);
@@ -452,28 +544,29 @@ void analyze_frequency(byte_file *bf) {
                 increment_count(pair_start, pair_len);
             }
 
-            // Decide whether to split after this instruction
-            int split = 0;
-            if (split_after(cur.opcode)) {
-                split = 1;
-            }
-            u_int32_t next_addr = i + cur.length;
-            if (next_addr < bf->code_size && jump_target[next_addr]) {
-                split = 1;
-            }
-
             // Update previous
             prev_start = (u_int8_t*)bf->code_ptr + i;
             prev_len = cur.length;
-            i = next_addr;
 
-            if (split) break;
+            uint32_t next_addr = i + cur.length;
+            bool should_split = (next_addr < bf->code_size && seq_split[next_addr]);
+
+            // Reset at split points
+            if (should_split) {
+                prev_start = NULL;
+                prev_len = 0;
+            }
+
+            i = next_addr;
         }
-        // Block ends, continue loop
     }
 
+    // Print statistics output (before freeing reachability data)
+    print_function_calls(bf);
+    print_reachability_stats(bf, reachable);
+
     free(reachable);
-    free(jump_target);
+    free(seq_split);
 
     // Collect all entries from hash table
     CountEntry *entry, *tmp;
