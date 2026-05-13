@@ -68,7 +68,7 @@ static bool decode_instruction(const u_int8_t *code, size_t max_len, u_int32_t a
     size_t pos = 1;
 
     // Get instruction info from X-macro table
-    instruction_info_t *instr = get_instruction_info(first);
+    instruction_info_t *instr = &instructions[first];
     if (!instr) {
         fatal_error("Failed to get information about instruction with opcode 0x%02x", first);
     }
@@ -225,7 +225,7 @@ static bool decode_instruction(const u_int8_t *code, size_t max_len, u_int32_t a
 }
 
 static void print_instr(const InstrInfo *info, FILE *out) {
-    instruction_info_t *instr = get_instruction_info(info->opcode);
+    instruction_info_t *instr = &instructions[info->opcode];
     if (!instr) {
         fatal_error("Failed to get information about instruction with opcode 0x%02x", info->opcode);
         return;
@@ -355,17 +355,17 @@ static void increment_count(const u_int8_t *data, size_t len) {
 
 // Reachability analysis - universal using instruction flags
 static bool is_control_transfer(uint8_t op) {
-    instruction_info_t *instr = get_instruction_info(op);
+    instruction_info_t *instr = &instructions[op];
     return instr && (instr->flags & INSTR_FLAG_JUMP);
 }
 
 static bool is_terminal(uint8_t op) {
-    instruction_info_t *instr = get_instruction_info(op);
+    instruction_info_t *instr = &instructions[op];
     return instr && (instr->flags & INSTR_FLAG_HALT);
 }
 
 static bool split_after(uint8_t op) {
-    instruction_info_t *instr = get_instruction_info(op);
+    instruction_info_t *instr = &instructions[op];
     if (!instr) return false;
 
     // Split after jumps, calls, and terminal instructions
@@ -461,7 +461,7 @@ void analyze_frequency(byte_file *bf) {
         }
 
 #if DEBUG_ANALYSIS
-        instruction_info_t *instr = get_instruction_info(info.opcode);
+        instruction_info_t *instr = &instructions[info.opcode];
         printf("DEBUG: Visiting addr=0x%08x, bytes_len=%zu, name=%s\n",
                addr, info.length, instr->instr_name);
 #endif
@@ -530,7 +530,7 @@ void analyze_frequency(byte_file *bf) {
             }
 
 #if DEBUG_ANALYSIS
-            instruction_info_t *instr = get_instruction_info(cur.opcode);
+            instruction_info_t *instr = &instructions[cur.opcode];
             printf("DEBUG: Sequence: %s (len=%zu) at 0x%08x\n", instr->instr_name, cur.length, i);
 #endif
 

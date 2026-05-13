@@ -6,9 +6,11 @@
 #include <stdbool.h>
 
 // ADDRESSING MODES (Global, local, argument, constant)
-#define ADDR_MODE(mode, name, symbol) ADDR_##name = mode,
 typedef enum {
+    #define ADDR_MODE(mode, name, symbol) ADDR_##name = mode,
+
     #include "opcodes.def"
+
     ADDR_MODE_MAX
 } addr_mode_t;
 
@@ -44,17 +46,6 @@ static inline uint8_t low_bits(const uint8_t instruction) {
 typedef enum {
     #define INSTR(opcode, name, arg_size, flags) BC_TYPE_##name = opcode,
 
-    #define BINOP(opcode, name, symbol) BC_TYPE_BINOP_##name = opcode,
-    #define LD(opcode, name) BC_TYPE_LD_##name = opcode,
-    #define LDA(opcode, name) BC_TYPE_LDA_##name = opcode,
-    #define ST(opcode, name) BC_TYPE_ST_##name = opcode,
-    #define PATT(opcode, name) BC_TYPE_PATT_##name = opcode,
-    #define GROUP_INFO(name, arg_size, flags)
-    #define INSTR_FORMAT(name)
-    #define FIELD_INT(name, size)
-    #define FIELD_ADDR_MODE(name, mode)
-    #define END_INSTR_FORMAT(name)
-
     #include "opcodes.def"
 
     BC_TYPE_MAX
@@ -74,18 +65,6 @@ typedef enum {
 typedef enum {
     #define BINOP(opcode, name, symbol) BINOP_##name = opcode,
 
-    #define INSTR(opcode, name, arg_size, flags)
-    #define LD(opcode, name)
-    #define LDA(opcode, name)
-    #define ST(opcode, name)
-    #define PATT(opcode, name)
-    #define GROUP_INFO(name, arg_size, flags)
-    #define INSTR_FORMAT(name)
-    #define FIELD_INT(name, size)
-    #define FIELD_ADDR_MODE(name, mode)
-    #define END_INSTR_FORMAT(name)
-    #define ADDR_MODE(mode, name, symbol)
-
     #include "opcodes.def"
 
     BINOP_MAX
@@ -94,18 +73,6 @@ typedef enum {
 // Generate PATT operation constants from opcodes.def
 typedef enum {
     #define PATT(opcode, name) PATT_##name = opcode,
-    #define INSTR(opcode, name, arg_size, flags)
-
-    #define BINOP(opcode, name, symbol)
-    #define LD(opcode, name)
-    #define LDA(opcode, name)
-    #define ST(opcode, name)
-    #define GROUP_INFO(name, arg_size, flags)
-    #define INSTR_FORMAT(name)
-    #define FIELD_INT(name, size)
-    #define FIELD_ADDR_MODE(name, mode)
-    #define END_INSTR_FORMAT(name)
-    #define ADDR_MODE(mode, name, symbol)
 
     #include "opcodes.def"
 
@@ -130,12 +97,6 @@ typedef struct {
 
 // Global lookup table (contains both standalone and group instructions)
 extern instruction_info_t instructions[256];
-
-// Lookup functions
-static inline instruction_info_t* get_instruction_info(uint8_t opcode) {
-    if (opcode >= 256) return NULL;
-    return &instructions[opcode];
-}
 
 // Get BINOP symbol if applicable
 static inline const char* get_binop_symbol(uint8_t opcode) {

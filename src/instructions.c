@@ -58,33 +58,8 @@ instruction_info_t instructions[256];
 
 // Combined instruction array with both standalone and group instructions
 static const instruction_info_t all_instructions[] = {
-
-    // Group-based instructions - they get properties from group_info_table
-    #define GROUP_INFO(name, arg_size, flags)
-
-    #define BINOP(opcode, name, symbol) \
-        {opcode, "BINOP_" #name, 0, 0, true, #symbol},
-
-    #define LD(opcode, name) \
-        {opcode, "LD_" #name, 0, 0, true, NULL},
-
-    #define LDA(opcode, name) \
-        {opcode, "LDA_" #name, 0, 0, true, NULL},
-
-    #define ST(opcode, name) \
-        {opcode, "ST_" #name, 0, 0, true, NULL},
-
-    #define PATT(opcode, name) \
-        {opcode, "PATT_" #name, 0, 0, true, NULL},
-
-    // Standalone instructions
     #define INSTR(opcode, name, arg_size, flags) \
         {opcode, #name, arg_size, flags, false, NULL},
-
-    #define INSTR_FORMAT(name)
-    #define FIELD_INT(name, size)
-    #define FIELD_ADDR_MODE(name, mode)
-    #define END_INSTR_FORMAT(name)
 
     #include "../include/opcodes.def"
 

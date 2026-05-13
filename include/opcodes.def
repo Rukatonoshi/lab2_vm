@@ -2,32 +2,32 @@
 #define GROUP_INFO(name, arg_size, flags)
 #endif
 
+#ifndef INSTR
+#define INSTR(opcode, name, arg_size, flags)
+#endif
+
 #ifndef BINOP
-#define BINOP(opcode, name, symbol)
+#define BINOP(opcode, name, symbol) INSTR(opcode, BINOP_##name, 0, 0)
 #endif
 
 #ifndef LD
-#define LD(opcode, name)
+#define LD(opcode, name) INSTR(opcode, LD_##name, 4, 0)
 #endif
 
 #ifndef LDA
-#define LDA(opcode, name)
+#define LDA(opcode, name) INSTR(opcode, LDA_##name, 4, 0)
 #endif
 
 #ifndef ST
-#define ST(opcode, name)
+#define ST(opcode, name) INSTR(opcode, ST_##name, 4, 0)
 #endif
 
 #ifndef PATT
-#define PATT(opcode, name)
+#define PATT(opcode, name) INSTR(opcode, PATT_##name, 0, 0)
 #endif
 
 #ifndef ADDR_MODE
 #define ADDR_MODE(mode, name, symbol)
-#endif
-
-#ifndef INSTR
-#define INSTR(opcode, name, arg_size, flags)
 #endif
 
 // GROUP PROPERTIES
