@@ -3,8 +3,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define INSTR_FORMAT(name) \
-    static field_descriptor_t name##_fields[] = {
+// Closure format
+static const instruction_format_t* format_table[256] = {0};
+
+#define INSTR_FORMAT(opcode) \
+    static field_descriptor_t fields_##opcode[] = {
 
 #define FIELD_INT(name, size) \
     { name, FIELD_TYPE_INT, size, NULL },
@@ -12,29 +15,26 @@
 #define FIELD_ADDR_MODE(name, mode) \
     { name, FIELD_TYPE_ADDR_MODE, 1, #mode },   // #mode → "ADDR_MODE"
 
-#define END_INSTR_FORMAT(name) \
+#define END_INSTR_FORMAT(opcode) \
     }; \
-    static const instruction_format_t format_##name = { \
-        #name, \
-        name##_fields, \
-        sizeof(name##_fields) / sizeof(name##_fields[0]) \
+    static const instruction_format_t format_##opcode = { \
+        opcode, \
+        fields_##opcode, \
+        sizeof(fields_##opcode) / sizeof(fields_##opcode[0]) \
     };
 
 #include "../include/opcodes.def"
 
-// Closure format
-static const instruction_format_t* format_table[] = {
-    &format_CLOSURE,
-    NULL
-};
+void init_instruction_formats(void) {
+    #define INSTR_FORMAT(opcode)     format_table[opcode] = &format_##opcode;
+    #define END_INSTR_FORMAT(opcode)
+    #define FIELD_INT(name, size)
+    #define FIELD_ADDR_MODE(name, mode)
+    #include "opcodes.def"
+}
 
-const instruction_format_t* get_instruction_format(const char* name) {
-    if (!name) return NULL;
-    for (int i = 0; format_table[i]; ++i) {
-        if (strcmp(format_table[i]->name, name) == 0)
-            return format_table[i];
-    }
-    return NULL;
+const instruction_format_t* get_instruction_format(uint8_t opcode) {
+    return format_table[opcode];
 }
 
 #define BINOP(opcode, name, symbol) #symbol,
@@ -108,6 +108,7 @@ void init_instructions(void) {
 __attribute__((constructor))
 static void auto_init_instructions(void) {
     init_instructions();
+    init_instruction_formats();
 }
 
 // DEBUG FUNCTION

@@ -43,31 +43,6 @@ ADDR_MODE(1, LOCAL, L)
 ADDR_MODE(2, ARGUMENT, A)
 ADDR_MODE(3, CLOSURE, C)
 
-// INSTRUCTION FORMAT DEFINITIONS
-#ifndef INSTR_FORMAT
-#define INSTR_FORMAT(name)
-#endif
-
-#ifndef FIELD_INT
-#define FIELD_INT(name, size)
-#endif
-
-#ifndef FIELD_ADDR_MODE
-#define FIELD_ADDR_MODE(name, mode)
-#endif
-
-#ifndef END_INSTR_FORMAT
-#define END_INSTR_FORMAT(name)
-#endif
-
-// INSTRUCTION FORMATS (for variable-length instructions)
-INSTR_FORMAT(CLOSURE)
-    FIELD_INT("code_offset", 4)
-    FIELD_INT("capture_count", 4)
-    FIELD_ADDR_MODE("mode", ADDR_MODE)
-    FIELD_INT("index", 4)
-END_INSTR_FORMAT(CLOSURE)
-
 // BINARY OPERATIONS
 BINOP(0x01, ADD, +)
 BINOP(0x02, SUB, -)
@@ -150,6 +125,31 @@ INSTR(0x71, CALL_WRITE, 0, 0)
 INSTR(0x72, CALL_LENGTH, 0, 0)
 INSTR(0x73, CALL_STRING, 0, 0)
 INSTR(0x74, CALL_ARRAY, 4, 0)
+
+// INSTRUCTION FORMAT DEFINITIONS
+#ifndef INSTR_FORMAT
+#define INSTR_FORMAT(opcode)
+#endif
+
+#ifndef FIELD_INT
+#define FIELD_INT(name, size)
+#endif
+
+#ifndef FIELD_ADDR_MODE
+#define FIELD_ADDR_MODE(name, mode)
+#endif
+
+#ifndef END_INSTR_FORMAT
+#define END_INSTR_FORMAT(opcode)
+#endif
+
+// INSTRUCTION FORMATS (for variable-length instructions)
+INSTR_FORMAT(0x54)
+    FIELD_INT("code_offset", 4)
+    FIELD_INT("capture_count", 4)
+    FIELD_ADDR_MODE("mode", ADDR_MODE)
+    FIELD_INT("index", 4)
+END_INSTR_FORMAT(0x54)
 
 #undef GROUP_INFO
 #undef BINOP

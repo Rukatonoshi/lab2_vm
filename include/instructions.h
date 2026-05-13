@@ -129,12 +129,12 @@ typedef struct {
 } field_descriptor_t;
 
 typedef struct {
-    const char* name;
+    uint8_t opcode;
     const field_descriptor_t* fields;
     int field_count;
 } instruction_format_t;
 
 // Get instruction format by name
-const instruction_format_t* get_instruction_format(const char* name);
+const instruction_format_t* get_instruction_format(uint8_t opcode);
 
 #endif // INSTRUCTIONS_H

@@ -88,7 +88,7 @@ static bool decode_instruction(const u_int8_t *code, size_t max_len, u_int32_t a
     // Allocate appropriate initial capacity based on instruction type
     size_t initial_capacity = 8; // Default for non-VARLEN instructions
     if (instr->flags & INSTR_FLAG_VARLEN) {
-        const instruction_format_t* fmt = get_instruction_format(instr->instr_name);
+        const instruction_format_t* fmt = get_instruction_format(info->opcode);
         if (fmt) {
             // Count non-repeating fields before count field
             int non_repeating = 0;
@@ -112,8 +112,10 @@ static bool decode_instruction(const u_int8_t *code, size_t max_len, u_int32_t a
     // Universal parameter reading using format table
     const instruction_format_t* format = NULL;
     if (instr->flags & INSTR_FLAG_VARLEN) {
-        format = get_instruction_format(instr->instr_name);
-        if (!format) return false;
+        format = get_instruction_format(info->opcode);
+        if (!format) {
+            return false;
+        }
     }
 
     int arg_size = instr->arg_size;
@@ -244,7 +246,7 @@ static void print_instr(const InstrInfo *info, FILE *out) {
     if (info->param_count > 0) {
         const instruction_format_t* format = NULL;
         if (instr->flags & INSTR_FLAG_VARLEN) {
-            format = get_instruction_format(instr->instr_name);
+            format = get_instruction_format(instr->opcode);
         }
 
         // Format-based printing for VARLEN instructions
@@ -457,7 +459,7 @@ void analyze_frequency(byte_file *bf) {
 
         InstrInfo info;
         if (!decode_instruction((u_int8_t*)bf->code_ptr + addr, bf->code_size - addr, addr, &info)) {
-            fatal_error("Failed to decode instruction at offset 0x%02x", addr);
+            fatal_error("Failed to decode instruction 0x%02X at offset 0x%02x", info.opcode, addr);
         }
 
 #if DEBUG_ANALYSIS
