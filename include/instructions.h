@@ -5,22 +5,19 @@
 #include <stddef.h>
 #include <stdbool.h>
 
-// ADDRESSING MODES (from opcodes.def)
-#undef ADDR_MODE
+// ADDRESSING MODES (Global, local, argument, constant)
 #define ADDR_MODE(mode, name, symbol) ADDR_##name = mode,
 typedef enum {
     #include "opcodes.def"
     ADDR_MODE_MAX
-
 } addr_mode_t;
-#undef ADDR_MODE
 
 #define INSTR_FLAG_JUMP 0x01
 #define INSTR_FLAG_HALT 0x02
 #define INSTR_FLAG_BREAK 0x04
 #define INSTR_FLAG_VARLEN 0x08
 
-// GROUP INFO STORAGE - stores group properties (arg_size, flags)
+// group properties (arg_size, flags)
 typedef struct {
     int arg_size;
     uint8_t flags;
@@ -45,19 +42,6 @@ static inline uint8_t low_bits(const uint8_t instruction) {
 // Generate BYTECODE ENUM FROM OPCODES.DEF
 // Used in interpreter
 typedef enum {
-    #undef GROUP_INFO
-    #undef BINOP
-    #undef LD
-    #undef LDA
-    #undef ST
-    #undef PATT
-    #undef ADDR_MODE
-    #undef INSTR
-    #undef INSTR_FORMAT
-    #undef FIELD_INT
-    #undef FIELD_ADDR_MODE
-    #undef END_INSTR_FORMAT
-
     #define INSTR(opcode, name, arg_size, flags) BC_TYPE_##name = opcode,
 
     #define BINOP(opcode, name, symbol) BC_TYPE_BINOP_##name = opcode,
@@ -72,19 +56,6 @@ typedef enum {
     #define END_INSTR_FORMAT(name)
 
     #include "opcodes.def"
-
-    #undef INSTR
-    #undef BINOP
-    #undef LD
-    #undef LDA
-    #undef ST
-    #undef PATT
-    #undef GROUP_INFO
-    #undef INSTR_FORMAT
-    #undef FIELD_INT
-    #undef FIELD_ADDR_MODE
-    #undef END_INSTR_FORMAT
-    #undef ADDR_MODE
 
     BC_TYPE_MAX
 } bytecode_type_t;
@@ -117,19 +88,6 @@ typedef enum {
 
     #include "opcodes.def"
 
-    #undef INSTR
-    #undef BINOP
-    #undef LD
-    #undef LDA
-    #undef ST
-    #undef PATT
-    #undef GROUP_INFO
-    #undef INSTR_FORMAT
-    #undef FIELD_INT
-    #undef FIELD_ADDR_MODE
-    #undef END_INSTR_FORMAT
-    #undef ADDR_MODE
-
     BINOP_MAX
 } binop_op_t;
 
@@ -150,19 +108,6 @@ typedef enum {
     #define ADDR_MODE(mode, name, symbol)
 
     #include "opcodes.def"
-
-    #undef INSTR
-    #undef BINOP
-    #undef LD
-    #undef LDA
-    #undef ST
-    #undef PATT
-    #undef GROUP_INFO
-    #undef INSTR_FORMAT
-    #undef FIELD_INT
-    #undef FIELD_ADDR_MODE
-    #undef END_INSTR_FORMAT
-    #undef ADDR_MODE
 
     PATT_MAX
 } patt_op_t;
@@ -192,26 +137,6 @@ static inline instruction_info_t* get_instruction_info(uint8_t opcode) {
     return &instructions[opcode];
 }
 
-static inline const char* get_instruction_name(uint8_t opcode) {
-    instruction_info_t* info = get_instruction_info(opcode);
-    return info ? info->instr_name : "UNKNOWN";
-}
-
-static inline int get_instruction_arg_size(uint8_t opcode) {
-    instruction_info_t* info = get_instruction_info(opcode);
-    return info ? info->arg_size : 0;
-}
-
-static inline uint8_t get_instruction_flags(uint8_t opcode) {
-    instruction_info_t* info = get_instruction_info(opcode);
-    return info ? info->flags : 0;
-}
-
-static inline bool is_group_instruction(uint8_t opcode) {
-    instruction_info_t* info = get_instruction_info(opcode);
-    return info ? info->is_group : false;
-}
-
 // Get BINOP symbol if applicable
 static inline const char* get_binop_symbol(uint8_t opcode) {
     if (high_bits(opcode) == HIGH_BITS_BINOP) {
@@ -229,7 +154,7 @@ void init_instructions(void);
 // Print instructions table
 void debug_print_instructions(void);
 
-// INSTRUCTION FORMAT SYSTEM for variable-length instructions
+// variable-length instructions
 typedef enum {
     FIELD_TYPE_INT,
     FIELD_TYPE_ADDR_MODE,

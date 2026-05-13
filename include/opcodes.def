@@ -151,16 +151,15 @@ INSTR(0x72, CALL_LENGTH, 0, 0)
 INSTR(0x73, CALL_STRING, 0, 0)
 INSTR(0x74, CALL_ARRAY, 4, 0)
 
-// NOTE: Caller is responsible for #undef-ing used macros
-// #undef GROUP_INFO
-// #undef BINOP
-// #undef LD
-// #undef LDA
-// #undef ST
-// #undef PATT
-// #undef ADDR_MODE
-// #undef INSTR
-// #undef INSTR_FORMAT
-// #undef FIELD_INT
-// #undef FIELD_ADDR_MODE
-// #undef END_INSTR_FORMAT
+#undef GROUP_INFO
+#undef BINOP
+#undef LD
+#undef LDA
+#undef ST
+#undef PATT
+#undef ADDR_MODE
+#undef INSTR
+#undef INSTR_FORMAT
+#undef FIELD_INT
+#undef FIELD_ADDR_MODE
+#undef END_INSTR_FORMAT

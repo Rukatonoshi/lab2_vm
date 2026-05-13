@@ -70,7 +70,7 @@ static bool decode_instruction(const u_int8_t *code, size_t max_len, u_int32_t a
     // Get instruction info from X-macro table
     instruction_info_t *instr = get_instruction_info(first);
     if (!instr) {
-        return false;
+        fatal_error("Failed to get information about instruction with opcode 0x%02x", first);
     }
 
     // Set opcode and subtype based on group membership

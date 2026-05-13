@@ -3,11 +3,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#undef INSTR_FORMAT
-#undef FIELD_INT
-#undef FIELD_ADDR_MODE
-#undef END_INSTR_FORMAT
-
 #define INSTR_FORMAT(name) \
     static field_descriptor_t name##_fields[] = {
 
@@ -25,23 +20,14 @@
         sizeof(name##_fields) / sizeof(name##_fields[0]) \
     };
 
-// Включаем opcodes.def, чтобы создать format_CLOSURE (и другие)
 #include "../include/opcodes.def"
 
-// Сразу убираем временные макросы, чтобы не мешали дальнейшим включениям
-#undef INSTR_FORMAT
-#undef FIELD_INT
-#undef FIELD_ADDR_MODE
-#undef END_INSTR_FORMAT
-
-// Таблица указателей на все сгенерированные форматы
-// (при добавлении нового формата не забудьте добавить его сюда)
+// Closure format
 static const instruction_format_t* format_table[] = {
     &format_CLOSURE,
     NULL
 };
 
-// Функция поиска формата по имени
 const instruction_format_t* get_instruction_format(const char* name) {
     if (!name) return NULL;
     for (int i = 0; format_table[i]; ++i) {
@@ -51,51 +37,21 @@ const instruction_format_t* get_instruction_format(const char* name) {
     return NULL;
 }
 
-#undef BINOP
 #define BINOP(opcode, name, symbol) #symbol,
 const char* binop_symbols[] = {
     #include "opcodes.def"
 };
-#undef BINOP
 
-#undef ADDR_MODE
 #define ADDR_MODE(mode, name, symbol) #symbol,
 const char* addr_mode_symbols[] = {
     #include "opcodes.def"
-    #undef GROUP_INFO
-    #undef BINOP
-    #undef LD
-    #undef LDA
-    #undef ST
-    #undef PATT
-    #undef ADDR_MODE
-    #undef INSTR
-    #undef INSTR_FORMAT
-    #undef FIELD_INT
-    #undef FIELD_ADDR_MODE
-    #undef END_INSTR_FORMAT
 };
-#undef ADDR_MODE
 
-#undef GROUP_INFO
 #define GROUP_INFO(name,arg_size, flags) \
     [HIGH_BITS_##name] = {arg_size, flags},
 group_info_t group_info_table[HIGH_BITS_MAX] = {
     #include "opcodes.def"
-        #undef GROUP_INFO
-    #undef BINOP
-    #undef LD
-    #undef LDA
-    #undef ST
-    #undef PATT
-    #undef ADDR_MODE
-    #undef INSTR
-    #undef INSTR_FORMAT
-    #undef FIELD_INT
-    #undef FIELD_ADDR_MODE
-    #undef END_INSTR_FORMAT
 };
-#undef GROUP_INFO
 
 // MASTER INSTRUCTION TABLE
 instruction_info_t instructions[256];
@@ -132,20 +88,7 @@ static const instruction_info_t all_instructions[] = {
 
     #include "../include/opcodes.def"
 
-    #undef GROUP_INFO
-    #undef BINOP
-    #undef LD
-    #undef LDA
-    #undef ST
-    #undef PATT
-    #undef ADDR_MODE
-    #undef INSTR
-    #undef INSTR_FORMAT
-    #undef FIELD_INT
-    #undef FIELD_ADDR_MODE
-    #undef END_INSTR_FORMAT
-
-    {0, NULL, 0, 0, false, NULL}  // Sentinel
+    {0, NULL, 0, 0, false, NULL}
 };
 
 // Initialize master instruction table
@@ -163,7 +106,7 @@ void init_instructions(void) {
     // Copy all instructions from the generated array to master table
     size_t count = sizeof(all_instructions) / sizeof(all_instructions[0]);
 
-    for (size_t i = 0; i < count - 1; i++) {  // Skip sentinel
+    for (size_t i = 0; i < count - 1; i++) {
         uint8_t opcode = all_instructions[i].opcode;
 
         instructions[opcode].opcode = opcode;
