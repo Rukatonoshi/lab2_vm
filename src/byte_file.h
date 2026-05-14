@@ -42,6 +42,7 @@ typedef struct {
     int32_t global_area_size;        // The size of global area (word)
     int32_t public_symbols_number;   // The number of public symbols
     u_int32_t code_size;             // The size of the bytecode (byte)
+    u_int32_t code_offset_base;       // The file offset of code beginning
     char buffer[0];
 } byte_file;
 
@@ -150,6 +151,8 @@ static inline byte_file *read_file(const char *file_name) {
 
     // Store code_size in structure for future bounds checks
     bf->code_size = code_size;
+
+    bf->code_offset_base = 12 + bf->public_symbols_number * 2 * sizeof(u_int32_t) + bf->string_table_size;
     // DEBUG
 //    printf("DEBUG:\nfile_size=%ld\ncode_size=%ld\ndata_size=%ld\n", file_size, code_size, data_size);
 

@@ -111,7 +111,7 @@ INSTR(0x52, BEGIN, 8, 0)
 INSTR(0x53, CBEGIN, 8, 0)
 INSTR(0x54, CLOSURE, 8, 0x08)  // VARLEN flag - variable length instruction
 INSTR(0x55, CALLC, 4, 0)
-INSTR(0x56, CALL, 8, 0x01)    // JUMP
+INSTR(0x56, CALL, 8, 0x05)    // JUMP|BREAK
 
 // Other Instructions (0x57 - 0x5A)
 INSTR(0x57, TAG, 8, 0)

@@ -356,16 +356,6 @@ static void increment_count(const u_int8_t *data, size_t len) {
 }
 
 // Reachability analysis - universal using instruction flags
-static bool is_control_transfer(uint8_t op) {
-    instruction_info_t *instr = &instructions[op];
-    return instr && (instr->flags & INSTR_FLAG_JUMP);
-}
-
-static bool is_terminal(uint8_t op) {
-    instruction_info_t *instr = &instructions[op];
-    return instr && (instr->flags & INSTR_FLAG_HALT);
-}
-
 static bool split_after(uint8_t op) {
     instruction_info_t *instr = &instructions[op];
     if (!instr) return false;
@@ -396,25 +386,25 @@ static int compare_entries(const void *a, const void *b) {
 static void print_function_calls(byte_file *bf) {
     printf("\n--- Public Functions ---\n");
 
-    // Calculate file offset base
-    uint32_t public_table_size = bf->public_symbols_number * 2 * sizeof(u_int32_t);
-    uint32_t file_offset_base = 12 + public_table_size + (uint32_t)bf->string_table_size;
-
     for (u_int32_t i = 0; i < bf->public_symbols_number; i++) {
         const char* name = get_public_name(bf, i);
         u_int32_t code_offset = get_public_offset(bf, i);
-        u_int32_t file_offset = file_offset_base + code_offset;
-        printf("Function %u: %s at file offset 0x%08x (code offset 0x%08x)\n", i, name, file_offset, code_offset);
+        u_int32_t file_offset = bf->code_offset_base + code_offset;
+        printf("Function %u: %s at addr 0x%08x (file offset 0x%08x)\n", i, name, code_offset, file_offset);
     }
 }
 
-static void print_reachability_stats(byte_file *bf, u_int8_t *reachable) {
+static void print_reachability_stats(byte_file *bf, u_int8_t *reachable, const uint8_t *jump_targets) {
     u_int32_t reachable_count = 0;
+    printf("\n--- Jump targets ---\n");
     for (u_int32_t i = 0; i < bf->code_size; i++) {
         if (reachable[i]) {
             reachable_count++;
+            if (jump_targets[i])
+                printf("    addr: 0x%04x, file_offset: 0x%04x - entry/jump target\n", i, bf->code_offset_base + i);
         }
     }
+
     printf("\n--- Reachability Stats ---\n");
     printf("Total code size: %u bytes\n", bf->code_size);
     printf("Reachable instructions: %u bytes\n", reachable_count);
@@ -424,172 +414,148 @@ static void print_reachability_stats(byte_file *bf, u_int8_t *reachable) {
 }
 
 // Main analysis function
-void analyze_frequency(byte_file *bf) {
-    // Array of reachable flags and split points (1 byte per code byte)
-    u_int8_t *reachable = (u_int8_t*)calloc(bf->code_size, 1);
-    u_int8_t *seq_split = (u_int8_t*)calloc(bf->code_size, 1);
-    if (!reachable || !seq_split) fatal_error("Out of memory");
+static void analyze_reachability(byte_file *bf, uint8_t *reachable, uint8_t *jump_targets) {
+    uint32_t *worklist = malloc(bf->code_size * sizeof(uint32_t));
+    if (!worklist) fatal_error("Out of memory!");
+    uint32_t wl_size = 0;
 
-    // Mark all public symbols as entry points (split points)
 #if DEBUG_ANALYSIS
     printf("DEBUG: Found %u public symbols\n", bf->public_symbols_number);
 #endif
 
-    for (u_int32_t i = 0; i < bf->public_symbols_number; i++) {
-        u_int32_t addr = get_public_offset(bf, i);
+    // Public symbols
+    for (uint32_t i = 0; i < bf->public_symbols_number; i++) {
+        uint32_t addr = get_public_offset(bf,i);
 #if DEBUG_ANALYSIS
-        printf("DEBUG: Public symbol %s at offset 0x%08x\n", get_public_name(bf, i), addr);
+        printf("DEBUG: Public symbol %s at offset 0x%08x (0x%08x)\n",
+                    get_public_name(bf, i),
+                    addr,
+                    bf->code_offset_base + addr);
 #endif
-        if (addr >= bf->code_size) {
-            fatal_error("Public symbol offset %u out of code bounds", addr);
-        }
+        if (addr >= bf->code_size)
+            fatal_error("Public symbol offset 0x%08x (0x%08x) out of bounds", addr, bf->code_offset_base + addr);
         if (!reachable[addr]) {
             reachable[addr] = 1;
-            seq_split[addr] = 1; // Public symbols are sequence start points
+            jump_targets[addr] = 1;
+            worklist[wl_size++] = addr;
         }
     }
 
-    // Forward pass: Mark reachable code and sequence split points
+    while (wl_size > 0) {
+        uint32_t addr = worklist[--wl_size];
+
+        InstrInfo info;
+        if (!decode_instruction((uint8_t*) bf->code_ptr + addr, bf->code_size - addr, addr, &info))
+            fatal_error("Failed to decode instruction at 0x%x", addr);
+
+        instruction_info_t *instr = &instructions[info.opcode];
+#if DEBUG_ANALYSIS
+        printf("DEBUG: Visiting addr=0x%08x (0x%08x), bytes_len=%zu, name=%s\n",
+               addr, bf->code_offset_base + addr, info.length, instr->instr_name);
+#endif
+
+        // If jump, add to worklist
+        if (instr->flags & INSTR_FLAG_JUMP) {
+            uint32_t target = info.params[0];
+            if (target >= bf->code_size)
+                fatal_error("Jump target %u out of bounds at 0x%x", target, addr);
+            jump_targets[target] = 1;
+            if(!reachable[target]) {
+                reachable[target] = 1;
+                worklist[wl_size++] = target;
+            }
+        }
+
+        // Next instruction is reachable, if next instr not terminal
+        if (!(instr->flags & INSTR_FLAG_HALT)) {
+            uint32_t next = addr + info.length;
+            if (next < bf->code_size && !reachable[next]) {
+                reachable[next] = 1;
+                worklist[wl_size++] = next;
+            }
+        }
+    }
+
+    free(worklist);
+}
+
+static void find_idioms(byte_file *bf, const uint8_t *reachable, const uint8_t *jump_targets) {
     uint32_t addr = 0;
+    uint32_t prev_addr = 0;
+    size_t prev_len = 0;
+    bool has_prev = false;
+
+#if DEBUG_ANALYSIS
+            printf("\n--- DEBUG Sequences ---\n");
+#endif
+
     while (addr < bf->code_size) {
         if (!reachable[addr]) {
-            addr++; // Skip unreachable bytes
+            addr++;
+            has_prev = false;
             continue;
         }
 
-        InstrInfo info;
-        if (!decode_instruction((u_int8_t*)bf->code_ptr + addr, bf->code_size - addr, addr, &info)) {
-            fatal_error("Failed to decode instruction 0x%02X at offset 0x%02x", info.opcode, addr);
-        }
+        if (jump_targets[addr])
+            has_prev = false;
 
-#if DEBUG_ANALYSIS
+        InstrInfo info;
+
+        if (!decode_instruction((uint8_t*) bf->code_ptr + addr, bf->code_size - addr, addr, &info))
+            fatal_error("Failed to decode instruction at 0x%x", addr);
+
         instruction_info_t *instr = &instructions[info.opcode];
-        printf("DEBUG: Visiting addr=0x%08x, bytes_len=%zu, name=%s\n",
-               addr, info.length, instr->instr_name);
+#if DEBUG_ANALYSIS
+            printf("DEBUG: Sequence: %s (len=%zu) at 0x%08x\n", instr->instr_name, info.length, addr);
 #endif
 
-        // Mark jump targets as split points
-        if (is_control_transfer(info.opcode)) {
-            u_int32_t target = info.params[0];
-            if (target >= bf->code_size) {
-                fatal_error("Jump target %u out of code bounds at offset %u", target, addr);
-            }
-            if (!reachable[target]) {
-                reachable[target] = 1; // New entry point
-                seq_split[target] = 1;  // Mark as sequence start
-            } else {
-                seq_split[target] = 1;  // Mark as sequence start (even if already reachable)
-            }
-        }
+        increment_count((uint8_t*) bf->code_ptr + addr, info.length);
 
-        // Mark next instruction if not terminal
-        if (!is_terminal(info.opcode)) {
-            uint32_t next = addr + info.length;
-            if (next < bf->code_size) {
-                reachable[next] = 1;
-            }
-        }
+        if (has_prev)
+            increment_count((uint8_t*) bf->code_ptr + prev_addr, prev_len + info.length);
 
-        // Mark split points after calls and split_after instructions
         if (split_after(info.opcode)) {
-            uint32_t next = addr + info.length;
-            if (next < bf->code_size) {
-                seq_split[next] = 1;
-            }
+            has_prev = false;
+        } else {
+            prev_addr = addr;
+            prev_len = info.length;
+            has_prev = true;
         }
 
         addr += info.length;
     }
+}
 
-#if DEBUG_ANALYSIS
-    if (DEBUG_ANALYSIS) {
-        uint32_t reachable_bytes = 0, split_count = 0;
-        for (uint32_t i = 0; i < bf->code_size; i++) {
-            if (reachable[i]) reachable_bytes++;
-            if (seq_split[i]) split_count++;
-        }
-        printf("DEBUG: Reachable bytes: %u, Split points: %u\n", reachable_bytes, split_count);
-    }
-#endif
+void analyze_frequency(byte_file *bf) {
+    uint8_t *reachable = calloc(bf->code_size, 1);
+    uint8_t *jump_targets = calloc(bf->code_size, 1);
+    if (!reachable || !jump_targets) fatal_error("Out of memory");
 
-    // Walk through code, building sequences using split points
-    u_int32_t i = 0;
-    while (i < bf->code_size) {
-        // Skip unreachable areas
-        if (!reachable[i]) {
-            i++;
-            continue;
-        }
-
-        // Start of a sequence
-        const u_int8_t *prev_start = NULL;
-        size_t prev_len = 0;
-
-        while (i < bf->code_size && reachable[i]) {
-            InstrInfo cur;
-            if (!decode_instruction((u_int8_t*)bf->code_ptr + i, bf->code_size - i, i, &cur)) {
-                fatal_error("Failed to decode instruction at offset %u", i);
-            }
-
-#if DEBUG_ANALYSIS
-            instruction_info_t *instr = &instructions[cur.opcode];
-            printf("DEBUG: Sequence: %s (len=%zu) at 0x%08x\n", instr->instr_name, cur.length, i);
-#endif
-
-            // Count single instruction
-            increment_count((u_int8_t*)bf->code_ptr + i, cur.length);
-
-            // Count pair with previous if exists
-            if (prev_start) {
-                size_t pair_len = prev_len + cur.length;
-                const u_int8_t *pair_start = prev_start;
-                increment_count(pair_start, pair_len);
-            }
-
-            // Update previous
-            prev_start = (u_int8_t*)bf->code_ptr + i;
-            prev_len = cur.length;
-
-            uint32_t next_addr = i + cur.length;
-            bool should_split = (next_addr < bf->code_size && seq_split[next_addr]);
-
-            // Reset at split points
-            if (should_split) {
-                prev_start = NULL;
-                prev_len = 0;
-            }
-
-            i = next_addr;
-        }
-    }
-
-    // Print statistics output (before freeing reachability data)
+    analyze_reachability(bf, reachable, jump_targets);
+    print_reachability_stats(bf, reachable, jump_targets);
     print_function_calls(bf);
-    print_reachability_stats(bf, reachable);
+    find_idioms(bf, reachable, jump_targets);
 
     free(reachable);
-    free(seq_split);
+    free(jump_targets);
 
-    // Collect all entries from hash table
     CountEntry *entry, *tmp;
-    size_t n_entries = HASH_COUNT(counts);
-    CountEntry **array = (CountEntry**)malloc(n_entries * sizeof(CountEntry*));
+    size_t n = HASH_COUNT(counts);
+    // TODO fix memory
+    CountEntry **array = malloc(n * sizeof(CountEntry*));
     if (!array) fatal_error("Out of memory");
+
     size_t idx = 0;
-    HASH_ITER(hh, counts, entry, tmp) {
+    HASH_ITER(hh, counts, entry, tmp)
         array[idx++] = entry;
+
+    qsort(array, n, sizeof(CountEntry*), compare_entries);
+
+    for (size_t i = 0; i < n; i++) {
+        printf("\n%u : ", array[i]->count);
+        print_sequence(stdout, (uint8_t*) array[i]->bytes, array[i]->len);
     }
 
-    qsort(array, n_entries, sizeof(CountEntry*), compare_entries);
-
-    // Print results
-    for (size_t j = 0; j < n_entries; j++) {
-        entry = array[j];
-        printf("\n%u : ", entry->count);
-        print_sequence(stdout, (u_int8_t*)entry->bytes, entry->len);
-    }
-
-    // Cleanup
     HASH_ITER(hh, counts, entry, tmp) {
         HASH_DEL(counts, entry);
         free(entry);
