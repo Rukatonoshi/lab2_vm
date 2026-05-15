@@ -63,7 +63,6 @@ static bool decode_instruction(const u_int8_t *code, size_t max_len, u_int32_t a
     if (max_len < 1) return false;
 
     u_int8_t first = code[0];
-    u_int8_t h = high_bits(first);
     u_int8_t l = low_bits(first);
     size_t pos = 1;
 
@@ -474,6 +473,7 @@ static void analyze_reachability(byte_file *bf, uint8_t *reachable, uint8_t *jum
                 worklist[wl_size++] = next;
             }
         }
+        free_instr_info(&info);
     }
 
     free(worklist);
@@ -523,6 +523,7 @@ static void find_idioms(byte_file *bf, const uint8_t *reachable, const uint8_t *
         }
 
         addr += info.length;
+        free_instr_info(&info);
     }
 }
 

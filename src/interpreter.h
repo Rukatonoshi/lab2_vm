@@ -74,7 +74,7 @@ static inline bool is_aggregative(u_int32_t val) {
     return is_string(val) || is_array(val) || is_sexp(val);
 }
 
-// Returns type of stringified(?) value
+// Returns type of value
 static const char* type_name(u_int32_t val) {
     if (UNBOXED(val)) return "integer";
     // Detect obj tag
