@@ -63,42 +63,37 @@ static bool decode_instruction(const u_int8_t *code, size_t max_len, InstrInfo *
     if (max_len < 1) return false;
 
     u_int8_t first = code[0];
-    u_int8_t l = low_bits(first);
     size_t pos = 1;
 
-    // Get instruction info from X-macro table
-    instruction_info_t *instr = &instructions[first];
-    if (!instr) {
+    u_int8_t flags = get_flags(first);
+    int arg_size = get_arg_size(first);
+
+    // get_arg_size returns -1 for unknown or incorrect opcodes
+    if (arg_size < 0) {
         fatal_error("Failed to get information about instruction with opcode 0x%02x", first);
     }
 
     // Set opcode and subtype based on group membership
     info->opcode = first;
     info->param_count = 0;
-
-    if (instr->is_group) {
-        // Extract subtype from low bits for group instructions
-        info->subtype = l;
-    } else {
-        // Standalone instruction, no meaningful subtype
-        info->subtype = 0;
-    }
+    info->subtype = low_bits(first);
 
     // Allocate appropriate initial capacity based on instruction type
     size_t initial_capacity = 8; // Default for non-VARLEN instructions
-    if (instr->flags & INSTR_FLAG_VARLEN) {
-        const instruction_format_t* fmt = get_instruction_format(info->opcode);
-        if (fmt) {
+    const instruction_format_t* format = NULL;
+    if (flags & INSTR_FLAG_VARLEN) {
+        format = get_instruction_format(info->opcode);
+        if (format) {
             // Count non-repeating fields before count field
             int non_repeating = 0;
-            for (int i = 0; i < fmt->field_count; i++) {
-                if (strstr(fmt->fields[i].name, "count") != NULL) {
+            for (int i = 0; i < format->field_count; i++) {
+                if (strstr(format->fields[i].name, "count") != NULL) {
                     break;
                 }
                 non_repeating++;
             }
             // Calculate sensible initial capacity (estimate for 2-4 repeating iterations)
-            int repeating_fields = fmt->field_count - non_repeating;
+            int repeating_fields = format->field_count - non_repeating;
             size_t estimated = non_repeating + repeating_fields * 4;
             initial_capacity = (estimated < 8) ? 8 : (estimated < 16) ? 16 : (estimated < 32) ? 32 : 64;
         } else {
@@ -107,17 +102,6 @@ static bool decode_instruction(const u_int8_t *code, size_t max_len, InstrInfo *
         }
     }
     if (!init_instr_info(info, initial_capacity)) return false;
-
-    // Universal parameter reading using format table
-    const instruction_format_t* format = NULL;
-    if (instr->flags & INSTR_FLAG_VARLEN) {
-        format = get_instruction_format(info->opcode);
-        if (!format) {
-            return false;
-        }
-    }
-
-    int arg_size = instr->arg_size;
 
     // Handle VARLEN instructions using format table
     if (format) {
@@ -224,13 +208,8 @@ static bool decode_instruction(const u_int8_t *code, size_t max_len, InstrInfo *
 }
 
 static void print_instr(const InstrInfo *info, FILE *out) {
-    instruction_info_t *instr = &instructions[info->opcode];
-    if (!instr) {
-        fatal_error("Failed to get information about instruction with opcode 0x%02x", info->opcode);
-        return;
-    }
+    const char *name = get_instr_name(info->opcode);
 
-    const char *name = instr->instr_name;
     if (strcmp(name, "UNKNOWN") == 0) {
         fatal_error("Failed to get instruction name with opcode 0x%02x", info->opcode);
         return;
@@ -239,70 +218,72 @@ static void print_instr(const InstrInfo *info, FILE *out) {
     // Print instruction name
     fprintf(out, "%s", name);
 
+    if (info->param_count == 0) return;
+
+    uint8_t flags = get_flags(info->opcode);
+    const instruction_format_t* format = NULL;
+
     // Print parameters
-    if (info->param_count > 0) {
-        const instruction_format_t* format = NULL;
-        if (instr->flags & INSTR_FLAG_VARLEN) {
-            format = get_instruction_format(instr->opcode);
-        }
+    if (flags & INSTR_FLAG_VARLEN) {
+        format = get_instruction_format(info->opcode);
+    }
 
-        // Format-based printing for VARLEN instructions
-        if (format) {
-            u_int32_t repeat_count = 0;
-            int repeat_start_field = -1;
-            int param_index = 0;
-            uint8_t mode;
-            const char* mode_str;
+    // Format-based printing for VARLEN instructions
+    if (format) {
+        u_int32_t repeat_count = 0;
+        int repeat_start_field = -1;
+        int param_index = 0;
+        uint8_t mode;
+        const char* mode_str;
 
-            // First pass: process non-repeating fields and extract count
-            for (int i = 0; i < format->field_count && param_index < info->param_count; i++) {
-                const field_descriptor_t* field = &format->fields[i];
+        // First pass: process non-repeating fields and extract count
+        for (int i = 0; i < format->field_count && param_index < info->param_count; i++) {
+            const field_descriptor_t* field = &format->fields[i];
 
-                if (field->type == FIELD_TYPE_INT) {
-                    // Check if this is the count field
-                    if (strstr(field->name, "count") != NULL) {
-                        repeat_count = info->params[param_index];
-                        repeat_start_field = i + 1;
-                        fprintf(out, " %u", info->params[param_index++]);
-                    } else if (repeat_start_field == -1) {
-                        // Before count field: process normally
-                        fprintf(out, " %u", info->params[param_index++]);
-                    }
+            if (field->type == FIELD_TYPE_INT) {
+                // Check if this is the count field
+                if (strstr(field->name, "count") != NULL) {
+                    repeat_count = info->params[param_index];
+                    repeat_start_field = i + 1;
+                    fprintf(out, " %u", info->params[param_index++]);
+                } else if (repeat_start_field == -1) {
+                    // Before count field: process normally
+                    fprintf(out, " %u", info->params[param_index++]);
                 }
             }
+        }
 
-            // Second pass: process repeating fields only if count > 0
-            if (repeat_count > 0 && repeat_start_field != -1) {
-                int num_repeating_fields = format->field_count - repeat_start_field;
+        // Second pass: process repeating fields only if count > 0
+        if (repeat_count > 0 && repeat_start_field != -1) {
+            int num_repeating_fields = format->field_count - repeat_start_field;
 
-                for (u_int32_t r = 0; r < repeat_count && param_index < info->param_count; r++) {
-                    for (int bf = 0; bf < num_repeating_fields && param_index < info->param_count; bf++) {
-                        const field_descriptor_t* repeating_field = &format->fields[repeat_start_field + bf];
+            for (u_int32_t r = 0; r < repeat_count && param_index < info->param_count; r++) {
+                for (int bf = 0; bf < num_repeating_fields && param_index < info->param_count; bf++) {
+                    const field_descriptor_t* repeating_field = &format->fields[repeat_start_field + bf];
 
-                        if (repeating_field->type == FIELD_TYPE_INT) {
-                            fprintf(out, " %u", info->params[param_index++]);
-                        } else if (repeating_field->type == FIELD_TYPE_ADDR_MODE) {
-                            mode = (uint8_t)info->params[param_index++];
-                            mode_str = "U";
-                            if (mode < ADDR_MODE_MAX) {
-                                mode_str = addr_mode_symbols[mode];
-                            }
-                            // Print mode(index) format for varspec fields
-                            if (param_index < info->param_count) {
-                                uint32_t index = info->params[param_index++];
-                                fprintf(out, " %s(%u)", mode_str, index);
-                            }
+                    if (repeating_field->type == FIELD_TYPE_INT) {
+                        fprintf(out, " %u", info->params[param_index++]);
+                    } else if (repeating_field->type == FIELD_TYPE_ADDR_MODE) {
+                        mode = (uint8_t)info->params[param_index++];
+                        mode_str = "U";
+                        if (mode < ADDR_MODE_MAX) {
+                            mode_str = get_addr_mode_symbol(mode);
+                        }
+                        // Print mode(index) format for varspec fields
+                        if (param_index < info->param_count) {
+                            uint32_t index = info->params[param_index++];
+                            fprintf(out, " %s(%u)", mode_str, index);
                         }
                     }
                 }
             }
-        } else {
-            // Standard parameter printing for non-VARLEN instructions
-            fprintf(out, " ");
-            for (size_t i = 0; i < info->param_count; i++) {
-                if (i > 0) fprintf(out, " ");
-                fprintf(out, "%u", info->params[i]);
-            }
+        }
+    } else {
+        // Standard parameter printing for non-VARLEN instructions
+        fprintf(out, " ");
+        for (size_t i = 0; i < info->param_count; i++) {
+            if (i > 0) fprintf(out, " ");
+            fprintf(out, "%u", info->params[i]);
         }
     }
 }
@@ -325,12 +306,12 @@ static void print_sequence(FILE *out, const u_int8_t *data, size_t len) {
 
 // Reachability analysis
 static bool split_after(uint8_t op) {
-    instruction_info_t *instr = &instructions[op];
+    uint8_t flags = get_flags(op);
 
     // Split after jumps, calls, and terminal instructions
-    if (instr->flags & INSTR_FLAG_JUMP) return true;
-    if (instr->flags & INSTR_FLAG_HALT) return true;
-    if (instr->flags & INSTR_FLAG_BREAK) return true;
+    if (flags & INSTR_FLAG_JUMP) return true;
+    if (flags & INSTR_FLAG_HALT) return true;
+    if (flags & INSTR_FLAG_BREAK) return true;
 
     return false;
 }
@@ -400,14 +381,16 @@ static void analyze_reachability(byte_file *bf, uint8_t *reachable, uint8_t *jum
         if (!decode_instruction((uint8_t*) bf->code_ptr + addr, bf->code_size - addr, &info))
             fatal_error("Failed to decode instruction at 0x%x", addr);
 
-        instruction_info_t *instr = &instructions[info.opcode];
+        uint8_t flags = get_flags(info.opcode);
+
 #if DEBUG_ANALYSIS
+        const char *instr_name = get_instr_name(info.opcode);
         printf("DEBUG: Visiting addr=0x%08x (0x%08x), bytes_len=%zu, name=%s\n",
-               addr, bf->code_offset_base + addr, info.length, instr->instr_name);
+               addr, bf->code_offset_base + addr, info.length, instr_name);
 #endif
 
         // If jump, add to worklist
-        if (instr->flags & INSTR_FLAG_JUMP) {
+        if (flags & INSTR_FLAG_JUMP) {
             uint32_t target = info.params[0];
             if (target >= bf->code_size)
                 fatal_error("Jump target %u out of bounds at 0x%x", target, addr);
@@ -419,7 +402,7 @@ static void analyze_reachability(byte_file *bf, uint8_t *reachable, uint8_t *jum
         }
 
         // Next instruction is reachable, if next instr not terminal
-        if (!(instr->flags & INSTR_FLAG_HALT)) {
+        if (!(flags & INSTR_FLAG_HALT)) {
             uint32_t next = addr + info.length;
             if (next < bf->code_size && !BIT_GET(reachable, next)) {
                 BIT_SET(reachable, next);

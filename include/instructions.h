@@ -79,38 +79,46 @@ typedef enum {
     PATT_MAX
 } patt_op_t;
 
-// Binary operation symbols mapping
-extern const char* binop_symbols[];
-
-// Addressing mode symbols mapping
-extern const char* addr_mode_symbols[];
-
-// Instruction information
-typedef struct {
-    uint8_t opcode;              // Full opcode byte
-    const char* instr_name;      // Instruction name
-    int arg_size;                // Argument size in bytes
-    uint8_t flags;               // Instruction flags
-    bool is_group;               // True if group-based instruction
-    const char* symbol;          // Symbol for display (for BINOP)
-} instruction_info_t;
-
-// Global lookup table (contains both standalone and group instructions)
-extern instruction_info_t instructions[256];
-
-// Get BINOP symbol if applicable
-static inline const char* get_binop_symbol(uint8_t opcode) {
-    if (high_bits(opcode) == HIGH_BITS_BINOP) {
-        uint8_t low = low_bits(opcode);
-        if (low >= 1 && low <= 0x0D) {
-            return binop_symbols[low];
-        }
+static inline int get_arg_size(uint8_t opcode) {
+    switch (opcode) {
+#define INSTR(op, name, arg_size, flags) case op: return (arg_size);
+#include "opcodes.def"
+        default: return -1;
     }
-    return NULL;
 }
 
-// Initialization
-void init_instructions(void);
+static inline uint8_t get_flags(uint8_t opcode) {
+    switch (opcode) {
+#define INSTR(op, name, arg_size, flags) case op: return (uint8_t)(flags);
+#include "opcodes.def"
+        default: return 0;
+    }
+}
+
+static inline const char *get_instr_name(uint8_t opcode) {
+    switch (opcode) {
+#define INSTR(op, name, arg_size, flags) case op: return #name;
+#include "opcodes.def"
+        default: return "UNKNOWN";
+    }
+}
+
+
+static inline const char *get_binop_symbol(uint8_t opcode) {
+    switch (opcode) {
+#define BINOP(op, name, symbol) case op: return #symbol;
+#include "opcodes.def"
+        default: return NULL;
+    }
+}
+
+static inline const char *get_addr_mode_symbol(addr_mode_t mode) {
+    switch (mode) {
+#define ADDR_MODE(m, name, symbol) case m: return #symbol;
+#include "opcodes.def"
+        default: return "?";
+    }
+}
 
 // Print instructions table
 void debug_print_instructions(void);
