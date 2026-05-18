@@ -5,11 +5,7 @@
 #include "byte_file.h"
 
 // Debug mode - set to 1 to enable detailed debug output
-#define DEBUG_ANALYSIS 1
-#define DEBUG_DECODE 0
-
-// Limitation for number of unique sequences
-#define MAX_UNIQUE_SEQUENCES 100000
+#define DEBUG_ANALYSIS 0
 
 #define READ_INT() do { \
     if (!ensure_capacity(info, info->param_count + 1)) return false; \
@@ -27,6 +23,10 @@
     info->params[info->param_count++] = b; \
     pos += 1; \
 } while(0)
+
+#define BITSET_SIZE(n)      (((n) + 7) / 8)
+#define BIT_SET(arr, i)     ((arr)[(i) >> 3] |=  (1u << ((i) & 7)))
+#define BIT_GET(arr, i)    (((arr)[(i) >> 3] >>  ((i) & 7)) & 1u)
 
 void analyze_frequency(byte_file *bf);
 

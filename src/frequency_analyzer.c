@@ -59,7 +59,7 @@ static bool ensure_capacity(InstrInfo *info, size_t needed) {
     return true;
 }
 
-static bool decode_instruction(const u_int8_t *code, size_t max_len, u_int32_t addr, InstrInfo *info) {
+static bool decode_instruction(const u_int8_t *code, size_t max_len, InstrInfo *info) {
     if (max_len < 1) return false;
 
     u_int8_t first = code[0];
@@ -150,9 +150,7 @@ static bool decode_instruction(const u_int8_t *code, size_t max_len, u_int32_t a
                     info->params[info->param_count++] = val;
                     pos += field->size;
                 }
-                // Skip repeating INT fields (they're processed in second pass)
             }
-            // Skip repeating ADDR_MODE fields in first pass
         }
 
         // Second pass: process repeating fields only if count > 0
@@ -241,7 +239,7 @@ static void print_instr(const InstrInfo *info, FILE *out) {
     // Print instruction name
     fprintf(out, "%s", name);
 
-    // Print parameters universally
+    // Print parameters
     if (info->param_count > 0) {
         const instruction_format_t* format = NULL;
         if (instr->flags & INSTR_FLAG_VARLEN) {
@@ -270,9 +268,7 @@ static void print_instr(const InstrInfo *info, FILE *out) {
                         // Before count field: process normally
                         fprintf(out, " %u", info->params[param_index++]);
                     }
-                    // After count field: skip (processed in second pass)
                 }
-                // Skip ADDR_MODE fields in first pass
             }
 
             // Second pass: process repeating fields only if count > 0
@@ -316,7 +312,7 @@ static void print_sequence(FILE *out, const u_int8_t *data, size_t len) {
     int first = 1;
     while (pos < len) {
         InstrInfo info;
-        if (!decode_instruction(data + pos, len - pos, pos, &info)) {
+        if (!decode_instruction(data + pos, len - pos, &info)) {
             fatal_error("Failed to decode instruction at offset 0x%02x", pos);
             return;
         }
@@ -327,37 +323,9 @@ static void print_sequence(FILE *out, const u_int8_t *data, size_t len) {
     }
 }
 
-// Hash table for counting sequences (using uthash)
-#include "uthash.h"
-
-typedef struct {
-    const u_int8_t *bytes;     // pointer to original bytecode
-    size_t len;
-    u_int32_t count;
-    UT_hash_handle hh;
-} CountEntry;
-
-static CountEntry *counts = NULL;
-
-static void increment_count(const u_int8_t *data, size_t len) {
-    CountEntry *entry;
-    HASH_FIND(hh, counts, data, len, entry);
-    if (!entry) {
-        if (HASH_COUNT(counts) >= MAX_UNIQUE_SEQUENCES) return;
-        entry = malloc(sizeof(CountEntry));
-        if (!entry) return;
-        entry->bytes = data;
-        entry->len = len;
-        entry->count = 0;
-        HASH_ADD_KEYPTR(hh, counts, entry->bytes, len, entry);
-    }
-    entry->count++;
-}
-
-// Reachability analysis - universal using instruction flags
+// Reachability analysis
 static bool split_after(uint8_t op) {
     instruction_info_t *instr = &instructions[op];
-    if (!instr) return false;
 
     // Split after jumps, calls, and terminal instructions
     if (instr->flags & INSTR_FLAG_JUMP) return true;
@@ -365,21 +333,6 @@ static bool split_after(uint8_t op) {
     if (instr->flags & INSTR_FLAG_BREAK) return true;
 
     return false;
-}
-
-// Comparison function for sorting entries (file scope, static)
-static int compare_entries(const void *a, const void *b) {
-    const CountEntry *ea = *(const CountEntry**)a;
-    const CountEntry *eb = *(const CountEntry**)b;
-    if (ea->count != eb->count) {
-        return (ea->count < eb->count) ? 1 : -1; // higher count first
-    }
-    size_t min_len = ea->len < eb->len ? ea->len : eb->len;
-    int cmp = memcmp(ea->bytes, eb->bytes, min_len);
-    if (cmp != 0) return cmp;
-    if (ea->len < eb->len) return -1;
-    if (ea->len > eb->len) return 1;
-    return 0;
 }
 
 static void print_function_calls(byte_file *bf) {
@@ -397,9 +350,9 @@ static void print_reachability_stats(byte_file *bf, u_int8_t *reachable, const u
     u_int32_t reachable_count = 0;
     printf("\n--- Jump targets ---\n");
     for (u_int32_t i = 0; i < bf->code_size; i++) {
-        if (reachable[i]) {
+        if (BIT_GET(reachable, i)) {
             reachable_count++;
-            if (jump_targets[i])
+            if (BIT_GET(jump_targets, i))
                 printf("    addr: 0x%04x, file_offset: 0x%04x - entry/jump target\n", i, bf->code_offset_base + i);
         }
     }
@@ -433,9 +386,9 @@ static void analyze_reachability(byte_file *bf, uint8_t *reachable, uint8_t *jum
 #endif
         if (addr >= bf->code_size)
             fatal_error("Public symbol offset 0x%08x (0x%08x) out of bounds", addr, bf->code_offset_base + addr);
-        if (!reachable[addr]) {
-            reachable[addr] = 1;
-            jump_targets[addr] = 1;
+        if (!BIT_GET(reachable, addr)) {
+            BIT_SET(reachable, addr);
+            BIT_SET(jump_targets, addr);
             worklist[wl_size++] = addr;
         }
     }
@@ -444,7 +397,7 @@ static void analyze_reachability(byte_file *bf, uint8_t *reachable, uint8_t *jum
         uint32_t addr = worklist[--wl_size];
 
         InstrInfo info;
-        if (!decode_instruction((uint8_t*) bf->code_ptr + addr, bf->code_size - addr, addr, &info))
+        if (!decode_instruction((uint8_t*) bf->code_ptr + addr, bf->code_size - addr, &info))
             fatal_error("Failed to decode instruction at 0x%x", addr);
 
         instruction_info_t *instr = &instructions[info.opcode];
@@ -458,9 +411,9 @@ static void analyze_reachability(byte_file *bf, uint8_t *reachable, uint8_t *jum
             uint32_t target = info.params[0];
             if (target >= bf->code_size)
                 fatal_error("Jump target %u out of bounds at 0x%x", target, addr);
-            jump_targets[target] = 1;
-            if(!reachable[target]) {
-                reachable[target] = 1;
+            BIT_SET(jump_targets, target);
+            if (!BIT_GET(reachable, target)) {
+                BIT_SET(reachable, target);
                 worklist[wl_size++] = target;
             }
         }
@@ -468,8 +421,8 @@ static void analyze_reachability(byte_file *bf, uint8_t *reachable, uint8_t *jum
         // Next instruction is reachable, if next instr not terminal
         if (!(instr->flags & INSTR_FLAG_HALT)) {
             uint32_t next = addr + info.length;
-            if (next < bf->code_size && !reachable[next]) {
-                reachable[next] = 1;
+            if (next < bf->code_size && !BIT_GET(reachable, next)) {
+                BIT_SET(reachable, next);
                 worklist[wl_size++] = next;
             }
         }
@@ -479,40 +432,75 @@ static void analyze_reachability(byte_file *bf, uint8_t *reachable, uint8_t *jum
     free(worklist);
 }
 
-static void find_idioms(byte_file *bf, const uint8_t *reachable, const uint8_t *jump_targets) {
-    uint32_t addr = 0;
-    uint32_t prev_addr = 0;
+// For sequence sorting by byte comparison
+// NOTE: count field is intentionally absent to minimize memory usage
+//  *   keys:    6 * 2 * code_size = 12 * code_size   (sorting phase)
+//  *   results: 10 * unique_count << 10 * total_seqs   (after dedup)
+typedef struct __attribute__((packed)) {
+    uint32_t offset;
+    uint16_t len;
+} SeqKey;
+
+// For sequence sorting by frequency
+// NOTE: forms via deduplication of SeqKeys
+typedef struct __attribute__((packed)) {
+    uint32_t offset;
+    uint32_t count;
+    uint16_t len;
+} SeqResult;
+
+static const uint8_t *seq_compare_base = NULL;
+
+// Byte comparison
+static int compare_keys(const void *a, const void *b) {
+    const SeqKey *sa = (const SeqKey*)a;
+    const SeqKey *sb = (const SeqKey*)b;
+    size_t min_len = sa->len < sb->len ? sa->len : sb->len;
+    int cmp = memcmp(seq_compare_base + sa->offset,
+                     seq_compare_base + sb->offset, min_len);
+    if (cmp != 0) return cmp;
+    return (sa->len < sb->len) ? -1 : (sa->len > sb->len) ? 1 : 0;
+}
+
+// Frequency counter
+static int compare_results_by_freq(const void *a, const void *b) {
+    const SeqResult *ua = (const SeqResult*)a;
+    const SeqResult *ub = (const SeqResult*)b;
+    if (ua->count != ub->count)
+        return (ua->count < ub->count) ? 1 : -1;
+    size_t min_len = ua->len < ub->len ? ua->len : ub->len;
+    int cmp = memcmp(seq_compare_base + ua->offset,
+                     seq_compare_base + ub->offset, min_len);
+    if (cmp != 0) return cmp;
+    return (ua->len < ub->len) ? -1 : (ua->len > ub->len) ? 1 : 0;
+}
+
+typedef void (*seq_callback)(void *ctx, uint32_t offset, uint16_t len);
+
+// Iterate over reachable bytecode and emit sequence records via callback
+// For each instruction we emit:
+//   * A single-instruction record (offset, len).
+//   * A two-instruction record (prev_offset, prev_len + len), with split flag checks
+static void process_sequences(byte_file *bf, const uint8_t *reachable, const uint8_t *jump_targets,
+                              seq_callback callback, void *ctx) {
+    uint32_t addr = 0, prev_addr = 0;
     size_t prev_len = 0;
     bool has_prev = false;
 
-#if DEBUG_ANALYSIS
-            printf("\n--- DEBUG Sequences ---\n");
-#endif
-
     while (addr < bf->code_size) {
-        if (!reachable[addr]) {
-            addr++;
-            has_prev = false;
-            continue;
-        }
-
-        if (jump_targets[addr])
-            has_prev = false;
+        if (!BIT_GET(reachable, addr)) { addr++; has_prev = false; continue; }
+        if (BIT_GET(jump_targets, addr)) has_prev = false;
 
         InstrInfo info;
-
-        if (!decode_instruction((uint8_t*) bf->code_ptr + addr, bf->code_size - addr, addr, &info))
+        if (!decode_instruction((uint8_t*)bf->code_ptr + addr, bf->code_size - addr, &info))
             fatal_error("Failed to decode instruction at 0x%x", addr);
 
-        instruction_info_t *instr = &instructions[info.opcode];
-#if DEBUG_ANALYSIS
-            printf("DEBUG: Sequence: %s (len=%zu) at 0x%08x\n", instr->instr_name, info.length, addr);
-#endif
+        callback(ctx, addr, (uint16_t)info.length);
 
-        increment_count((uint8_t*) bf->code_ptr + addr, info.length);
-
-        if (has_prev)
-            increment_count((uint8_t*) bf->code_ptr + prev_addr, prev_len + info.length);
+        if (has_prev) {
+            size_t pair_len = prev_len + info.length;
+            callback(ctx, prev_addr, (uint16_t)pair_len);
+        }
 
         if (split_after(info.opcode)) {
             has_prev = false;
@@ -527,39 +515,92 @@ static void find_idioms(byte_file *bf, const uint8_t *reachable, const uint8_t *
     }
 }
 
+// Counts how many sequence records will be emitted
+// No allocations here
+static void count_callback(void *ctx, uint32_t offset, uint16_t len) {
+    (void)offset; (void)len;
+    (*(size_t*)ctx)++;
+}
+
+// Writes one SeqKey per emitted sequence into the buffer
+static void add_key_callback(void *ctx, uint32_t offset, uint16_t len) {
+    SeqKey **ptr = (SeqKey**)ctx;
+    (*ptr)->offset = offset;
+    (*ptr)->len    = len;
+    (*ptr)++;
+}
+
 void analyze_frequency(byte_file *bf) {
-    uint8_t *reachable = calloc(bf->code_size, 1);
-    uint8_t *jump_targets = calloc(bf->code_size, 1);
+    // Both are freed as soon as the second process_sequences pass completes
+    uint8_t *reachable    = calloc(BITSET_SIZE(bf->code_size), 1);
+    uint8_t *jump_targets = calloc(BITSET_SIZE(bf->code_size), 1);
     if (!reachable || !jump_targets) fatal_error("Out of memory");
 
     analyze_reachability(bf, reachable, jump_targets);
     print_reachability_stats(bf, reachable, jump_targets);
     print_function_calls(bf);
-    find_idioms(bf, reachable, jump_targets);
 
-    free(reachable);
-    free(jump_targets);
+    // Count total sequences without allocating structures
+    size_t total_seqs = 0;
+    process_sequences(bf, reachable, jump_targets, count_callback, &total_seqs);
 
-    CountEntry *entry, *tmp;
-    size_t n = HASH_COUNT(counts);
-    // TODO fix memory
-    CountEntry **array = malloc(n * sizeof(CountEntry*));
-    if (!array) fatal_error("Out of memory");
+    // Populate SeqKey structure, where each record represent a single occurence
+    SeqKey *keys = malloc(total_seqs * sizeof(SeqKey));
+    if (!keys) fatal_error("Out of memory");
 
-    size_t idx = 0;
-    HASH_ITER(hh, counts, entry, tmp)
-        array[idx++] = entry;
+    // Pointer to keys structure, so we can iterate through the structure, saving the pointer to beginning in *keys
+    SeqKey *write_ptr = keys;
+    process_sequences(bf, reachable, jump_targets, add_key_callback, &write_ptr);
 
-    qsort(array, n, sizeof(CountEntry*), compare_entries);
+    // Free reachable and jump_targets
+    free(reachable);    reachable    = NULL;
+    free(jump_targets); jump_targets = NULL;
 
-    for (size_t i = 0; i < n; i++) {
-        printf("\n%u : ", array[i]->count);
-        print_sequence(stdout, (uint8_t*) array[i]->bytes, array[i]->len);
+    // Sort by raw byte content so that identical sequences become adjacent
+    seq_compare_base = bf->code_ptr;
+    qsort(keys, total_seqs, sizeof(SeqKey), compare_keys);
+
+    // Linear scan over sorted array of SeqKeys to count number of unique sequences
+    size_t unique_count = 0;
+    for (size_t i = 0; i < total_seqs; ) {
+        size_t j = i;
+        while (j < total_seqs && compare_keys(&keys[i], &keys[j]) == 0) j++;
+        unique_count++;
+        i = j;
     }
 
-    HASH_ITER(hh, counts, entry, tmp) {
-        HASH_DEL(counts, entry);
-        free(entry);
+    // Memory peak
+    //      *   keys:    6 * total_seqs
+    //      *   results: 10 * unique_count
+    SeqResult *results = malloc(unique_count * sizeof(SeqResult));
+    if (!results) fatal_error("Out of memory");
+
+    // [ADD][ADD][ADD][LD 1][LD 1][LD 2][RET][RET][RET][RET]
+    //  i         j
+    //  └───────┘ count=3
+    size_t r = 0;
+    for (size_t i = 0; i < total_seqs; ) {
+        size_t j = i;
+        while (j < total_seqs && compare_keys(&keys[i], &keys[j]) == 0) j++;
+        results[r].offset = keys[i].offset;
+        results[r].len    = keys[i].len;
+        results[r].count  = (uint32_t)(j - i);
+        r++;
+        i = j;
     }
-    free(array);
+
+    // SeqKeys successfully consumed to became SeqResults
+    free(keys); keys = NULL;
+
+    // Sequences with equal count are ordered by their raw bytes for a stable, deterministic output
+    qsort(results, unique_count, sizeof(SeqResult), compare_results_by_freq);
+
+    for (size_t i = 0; i < unique_count; i++) {
+        printf("\n%u : ", results[i].count);
+        print_sequence(stdout,
+                       (uint8_t*)bf->code_ptr + results[i].offset,
+                       results[i].len);
+    }
+
+    free(results);
 }
