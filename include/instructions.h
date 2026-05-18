@@ -134,7 +134,7 @@ typedef struct {
     int field_count;
 } instruction_format_t;
 
-// Get instruction format by name
+// Get instruction format by opcode
 const instruction_format_t* get_instruction_format(uint8_t opcode);
 
 #endif // INSTRUCTIONS_H
