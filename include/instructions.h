@@ -14,11 +14,6 @@ typedef enum {
     ADDR_MODE_MAX
 } addr_mode_t;
 
-#define INSTR_FLAG_JUMP 0x01
-#define INSTR_FLAG_HALT 0x02
-#define INSTR_FLAG_BREAK 0x04
-#define INSTR_FLAG_VARLEN 0x08
-
 // group properties (arg_size, flags)
 typedef struct {
     int arg_size;
